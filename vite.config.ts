@@ -168,7 +168,11 @@ export default defineConfig({
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
     rollupOptions: {
-      external: ["emoji-mart"],
+      output: {
+        manualChunks: {
+          "emoji-mart": ["@emoji-mart/react", "@emoji-mart/data"],
+        },
+      },
     },
   },
   server: {
