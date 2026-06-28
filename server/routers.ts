@@ -4744,16 +4744,4 @@ export const appRouter = router({
 export type AppRouter = typeof appRouter;
 
 
-// ─── Inactive User Reminders Router ─────────────────────────────────────────
-const inactiveRemindersRouter = router({
-  trigger: protectedProcedure
-    .mutation(async ({ ctx }) => {
-      // Only super admins can trigger this
-      if (ctx.user?.role !== "super_admin") {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Only super admins can trigger reminders" });
-      }
-      const { sendInactiveUserReminders } = await import("./inactiveUserReminder");
-      await sendInactiveUserReminders();
-      return { success: true, message: "Inactive user reminders job started" };
-    }),
-});
+

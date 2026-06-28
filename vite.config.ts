@@ -167,6 +167,9 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      external: ["emoji-mart"],
+    },
   },
   server: {
     host: true,
