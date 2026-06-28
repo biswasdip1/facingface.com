@@ -1,0 +1,21 @@
+CREATE TABLE `shop_listings` (
+	`id` int AUTO_INCREMENT NOT NULL,
+	`sellerId` int NOT NULL,
+	`title` varchar(255) NOT NULL,
+	`description` text,
+	`price` decimal(12,2) NOT NULL,
+	`currency` varchar(10) NOT NULL DEFAULT 'USD',
+	`condition` enum('new','like_new','good','fair','for_parts') NOT NULL DEFAULT 'good',
+	`category` varchar(100) NOT NULL DEFAULT 'other',
+	`mediaUrls` json DEFAULT ('[]'),
+	`location` varchar(255),
+	`lat` decimal(10,7),
+	`lng` decimal(10,7),
+	`contactEmail` varchar(320),
+	`contactPhone` varchar(30),
+	`status` enum('active','sold','draft','removed') NOT NULL DEFAULT 'active',
+	`viewCount` int NOT NULL DEFAULT 0,
+	`createdAt` timestamp NOT NULL DEFAULT (now()),
+	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	CONSTRAINT `shop_listings_id` PRIMARY KEY(`id`)
+);

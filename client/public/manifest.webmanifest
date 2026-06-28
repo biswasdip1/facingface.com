@@ -1,0 +1,41 @@
+{
+  "name": "FacingFace Chat",
+  "short_name": "FF Chat",
+  "description": "Dedicated Messenger for FacingFace conversations, voice notes, media, and calls.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#eef3fb",
+  "theme_color": "#2563eb",
+  "categories": ["social", "communication"],
+  "icons": [
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon.ico",
+      "sizes": "48x48",
+      "type": "image/x-icon"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Open Inbox",
+      "short_name": "Inbox",
+      "description": "Open FacingFace Chat inbox",
+      "url": "/",
+      "icons": [{ "src": "/apple-touch-icon.png", "sizes": "180x180" }]
+    },
+    {
+      "name": "Groups",
+      "short_name": "Groups",
+      "description": "Open group conversations",
+      "url": "/?groups=1",
+      "icons": [{ "src": "/apple-touch-icon.png", "sizes": "180x180" }]
+    }
+  ]
+}
