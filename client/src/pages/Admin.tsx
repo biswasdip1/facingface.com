@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useLocation } from "wouter";
 
 import {
-  Shield, Users, Flag, BarChart3, Settings, ChevronDown, ChevronUp,
+  Shield, Users, Flag, BarChart3, Settings, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Trash2, CheckCircle, Ban, UserCheck, BadgeCheck, XCircle, ClipboardList,
   ShoppingBag, Eye, AlertTriangle, FileImage, FileVideo, FileAudio, FileText,
   Globe, UsersRound, MessageSquareWarning, Search, BarChart2, Radio, Newspaper,
@@ -40,6 +40,41 @@ export default function Admin() {
   const [suspendUserId, setSuspendUserId] = useState<number | null>(null);
   const [suspendDays, setSuspendDays] = useState(7);
   const [suspendReason, setSuspendReason] = useState("");
+  const tabBarRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(true);
+
+  const checkScroll = () => {
+    if (tabBarRef.current) {
+      const { scrollLeft, scrollWidth, clientWidth } = tabBarRef.current;
+      setCanScrollLeft(scrollLeft > 0);
+      setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 10);
+    }
+  };
+
+  const scroll = (direction: 'left' | 'right') => {
+    if (tabBarRef.current) {
+      const scrollAmount = 200;
+      tabBarRef.current.scrollBy({
+        left: direction === 'left' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth'
+      });
+      setTimeout(checkScroll, 300);
+    }
+  };
+
+  useEffect(() => {
+    checkScroll();
+    const ref = tabBarRef.current;
+    if (ref) {
+      ref.addEventListener('scroll', checkScroll);
+      window.addEventListener('resize', checkScroll);
+      return () => {
+        ref.removeEventListener('scroll', checkScroll);
+        window.removeEventListener('resize', checkScroll);
+      };
+    }
+  }, []);
 
   if (!loading && (!user || (user.role !== "admin" && user.role !== "super_admin"))) {
     navigate("/");
@@ -82,27 +117,59 @@ export default function Admin() {
           </div>
         </div>
 
-        {/* Tabs — horizontally scrollable on mobile */}
-        <div
-          className="flex gap-0.5 mb-6 border-b overflow-x-auto scrollbar-none"
-          style={{ borderColor: "var(--its-border)", WebkitOverflowScrolling: "touch" }}
-        >
-          {visibleTabs.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => setActiveTab(id)}
-              className="flex flex-col sm:flex-row items-center gap-0.5 sm:gap-1.5 px-2 sm:px-4 py-2 sm:py-3 text-[10px] sm:text-sm font-medium transition-colors whitespace-nowrap flex-shrink-0"
-              style={{
-                color: activeTab === id ? "var(--its-text-primary)" : "var(--its-text-muted)",
-                borderBottom: activeTab === id ? "2px solid var(--its-text-primary)" : "2px solid transparent",
-                marginBottom: -1,
-                minWidth: 0,
-              }}
-            >
-              <Icon size={15} />
-              <span className="leading-none">{label}</span>
-            </button>
-          ))}
+        {/* Tabs with scroll buttons */}
+        <div className="flex items-center gap-2 mb-6 border-b" style={{ borderColor: "var(--its-border)" }}>
+          {/* Left scroll button */}
+          <button
+            onClick={() => scroll('left')}
+            disabled={!canScrollLeft}
+            className="hidden sm:flex items-center justify-center p-2 rounded flex-shrink-0 transition-opacity"
+            style={{
+              opacity: canScrollLeft ? 1 : 0.3,
+              cursor: canScrollLeft ? 'pointer' : 'default',
+              color: "var(--its-text-muted)"
+            }}
+          >
+            <ChevronLeft size={20} />
+          </button>
+
+          {/* Scrollable tabs container */}
+          <div
+            ref={tabBarRef}
+            className="flex gap-0.5 overflow-x-auto scrollbar-none flex-1"
+            style={{ WebkitOverflowScrolling: "touch" }}
+          >
+            {visibleTabs.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => setActiveTab(id)}
+                className="flex flex-col sm:flex-row items-center gap-0.5 sm:gap-1.5 px-2 sm:px-4 py-2 sm:py-3 text-[10px] sm:text-sm font-medium transition-colors whitespace-nowrap flex-shrink-0"
+                style={{
+                  color: activeTab === id ? "var(--its-text-primary)" : "var(--its-text-muted)",
+                  borderBottom: activeTab === id ? "2px solid var(--its-text-primary)" : "2px solid transparent",
+                  marginBottom: -1,
+                  minWidth: 0,
+                }}
+              >
+                <Icon size={15} />
+                <span className="leading-none">{label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Right scroll button */}
+          <button
+            onClick={() => scroll('right')}
+            disabled={!canScrollRight}
+            className="hidden sm:flex items-center justify-center p-2 rounded flex-shrink-0 transition-opacity"
+            style={{
+              opacity: canScrollRight ? 1 : 0.3,
+              cursor: canScrollRight ? 'pointer' : 'default',
+              color: "var(--its-text-muted)"
+            }}
+          >
+            <ChevronRight size={20} />
+          </button>
         </div>
 
         {/* Tab Content */}
