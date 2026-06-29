@@ -72,7 +72,7 @@ export default function Admin() {
 
   return (
     <div className="min-h-screen pt-16" style={{ backgroundColor: "var(--its-bg)", color: "var(--its-text-primary)" }}>
-      <div className="max-w-5xl mx-auto px-4 py-6">
+      <div className="mx-auto px-4 py-6">
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
           <Shield size={28} style={{ color: "var(--its-text-primary)" }} />
