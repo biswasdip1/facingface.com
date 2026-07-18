@@ -1614,11 +1614,8 @@ export async function getFlaggedComments(limit = 50, offset = 0) {
 export async function getAllUsers(limit = 100, offset = 0) {
   const db = await getDb();
   if (!db) return [];
-  // Get IDs of removed suggestions
-  const removed = await db.select({ userId: removedSuggestions.userId }).from(removedSuggestions);
-  const removedIds = removed.map(r => r.userId);
-  
-  let query = db.select({
+  // Use LEFT JOIN to exclude removed suggestions and users without profile photos
+  return db.select({
     id: users.id,
     name: users.name,
     email: users.email,
@@ -1629,14 +1626,13 @@ export async function getAllUsers(limit = 100, offset = 0) {
     suspendedUntil: users.suspendedUntil,
     suspendReason: users.suspendReason,
     createdAt: users.createdAt,
-  }).from(users);
-  
-  // Only apply the filter if there are removed IDs
-  if (removedIds.length > 0) {
-    query = query.where(notInArray(users.id, removedIds));
-  }
-  
-  return query.orderBy(desc(users.createdAt))
+  }).from(users)
+    .leftJoin(removedSuggestions, eq(users.id, removedSuggestions.userId))
+    .where(and(
+      isNull(removedSuggestions.id),  // Not in removedSuggestions
+      isNotNull(users.avatar)         // Has profile photo
+    ))
+    .orderBy(desc(users.createdAt))
     .limit(limit)
     .offset(offset);
 }
@@ -4737,6 +4733,7 @@ export async function hasRecentReminder(userId: number, days: number = 30): Prom
   
   return result.length > 0;
 }
+
 
 // ─── People You May Know - Remove Suggestions ──────────────────────────────────
 export async function removeUserFromSuggestions(userId: number, adminId: number): Promise<void> {

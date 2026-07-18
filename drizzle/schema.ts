@@ -1049,4 +1049,3 @@ export const removedSuggestions = pgTable("removedSuggestions", {
 });
 export type RemovedSuggestion = typeof removedSuggestions.$inferSelect;
 export type InsertRemovedSuggestion = typeof removedSuggestions.$inferInsert;
-

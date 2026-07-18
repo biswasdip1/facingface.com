@@ -2295,7 +2295,7 @@ const adminRouter = router({
   removePeopleYouMayKnowSuggestion: superAdminProcedure
     .input(z.object({ userId: z.number() }))
     .mutation(async ({ input, ctx }) => {
-      // Remove user from suggestions in database
+      // Persist removal to database
       await removeUserFromSuggestions(input.userId, ctx.user.id);
       
       await insertAuditLog({
