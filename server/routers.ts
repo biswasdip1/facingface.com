@@ -336,7 +336,6 @@ import {
   trackAdEvent,
   getAdStats,
   getSuggestedUsers,
-  removeUserFromSuggestions,
 } from "./db";
 import { stripe, getOrCreateBadgePrice } from "./stripe";
 import { sendVerificationEmail, sendPasswordResetEmail, sendSupportMessageEmail, sendLoginLockoutEmail, sendReportEmail } from "./email";
@@ -2295,9 +2294,6 @@ const adminRouter = router({
   removePeopleYouMayKnowSuggestion: superAdminProcedure
     .input(z.object({ userId: z.number() }))
     .mutation(async ({ input, ctx }) => {
-      // Persist removal to database
-      await removeUserFromSuggestions(input.userId, ctx.user.id);
-      
       await insertAuditLog({
         actorId: ctx.user.id,
         actorName: ctx.user.name ?? undefined,

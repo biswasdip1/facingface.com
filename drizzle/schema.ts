@@ -1040,12 +1040,3 @@ export const adminBroadcasts = pgTable("adminBroadcasts", {
 export type AdminBroadcast = typeof adminBroadcasts.$inferSelect;
 export type InsertAdminBroadcast = typeof adminBroadcasts.$inferInsert;
 
-// ─── People You May Know - Removed Suggestions ──────────────────────────────────────
-export const removedSuggestions = pgTable("removedSuggestions", {
-  id: serial("id").primaryKey(),
-  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
-  removedByAdminId: integer("removedByAdminId").notNull().references(() => users.id, { onDelete: "cascade" }),
-  removedAt: timestamp("removedAt").defaultNow().notNull(),
-});
-export type RemovedSuggestion = typeof removedSuggestions.$inferSelect;
-export type InsertRemovedSuggestion = typeof removedSuggestions.$inferInsert;
