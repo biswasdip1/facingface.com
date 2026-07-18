@@ -1618,7 +1618,7 @@ export async function getAllUsers(limit = 100, offset = 0) {
   const removed = await db.select({ userId: removedSuggestions.userId }).from(removedSuggestions);
   const removedIds = removed.map(r => r.userId);
   
-  return db.select({
+  let query = db.select({
     id: users.id,
     name: users.name,
     email: users.email,
@@ -1629,9 +1629,14 @@ export async function getAllUsers(limit = 100, offset = 0) {
     suspendedUntil: users.suspendedUntil,
     suspendReason: users.suspendReason,
     createdAt: users.createdAt,
-  }).from(users)
-    .where(removedIds.length > 0 ? notInArray(users.id, removedIds) : undefined)
-    .orderBy(desc(users.createdAt))
+  }).from(users);
+  
+  // Only apply the filter if there are removed IDs
+  if (removedIds.length > 0) {
+    query = query.where(notInArray(users.id, removedIds));
+  }
+  
+  return query.orderBy(desc(users.createdAt))
     .limit(limit)
     .offset(offset);
 }
