@@ -128,6 +128,9 @@ import {
   inactiveUserReminders,
   InactiveUserReminder,
   InsertInactiveUserReminder,
+  removedSuggestions,
+  RemovedSuggestion,
+  InsertRemovedSuggestion,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -1611,6 +1614,10 @@ export async function getFlaggedComments(limit = 50, offset = 0) {
 export async function getAllUsers(limit = 100, offset = 0) {
   const db = await getDb();
   if (!db) return [];
+  // Get IDs of removed suggestions
+  const removed = await db.select({ userId: removedSuggestions.userId }).from(removedSuggestions);
+  const removedIds = removed.map(r => r.userId);
+  
   return db.select({
     id: users.id,
     name: users.name,
@@ -1622,7 +1629,11 @@ export async function getAllUsers(limit = 100, offset = 0) {
     suspendedUntil: users.suspendedUntil,
     suspendReason: users.suspendReason,
     createdAt: users.createdAt,
-  }).from(users).orderBy(desc(users.createdAt)).limit(limit).offset(offset);
+  }).from(users)
+    .where(removedIds.length > 0 ? notInArray(users.id, removedIds) : undefined)
+    .orderBy(desc(users.createdAt))
+    .limit(limit)
+    .offset(offset);
 }
 
 export async function unsuspendUser(userId: number): Promise<void> {
@@ -4720,4 +4731,24 @@ export async function hasRecentReminder(userId: number, days: number = 30): Prom
     .limit(1);
   
   return result.length > 0;
+}
+
+// ─── People You May Know - Remove Suggestions ──────────────────────────────────
+export async function removeUserFromSuggestions(userId: number, adminId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  
+  // Check if already removed
+  const existing = await db.select()
+    .from(removedSuggestions)
+    .where(eq(removedSuggestions.userId, userId))
+    .limit(1);
+  
+  if (existing.length === 0) {
+    // Insert new removal record
+    await db.insert(removedSuggestions).values({
+      userId,
+      removedByAdminId: adminId,
+    });
+  }
 }
