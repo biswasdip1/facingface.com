@@ -1,12 +1,8 @@
 # ─── render.yaml ─────────────────────────────────────────────────────────────
 # Render.com Blueprint for FacingFace
-# https://render.com/docs/blueprint-spec
 #
-# Usage:
-#   1. Push this repo to GitHub
-#   2. In Render Dashboard → "New Blueprint" → connect your repo
-#   3. Set all required environment variables in the Render dashboard
-#   4. Deploy!
+# The attached disk stores user-uploaded media. It must remain attached at
+# /var/data for uploads to survive deploys and restarts.
 
 services:
   - type: web
@@ -15,8 +11,12 @@ services:
     plan: starter
     buildCommand: npm install --legacy-peer-deps && npm run build
     startCommand: node dist/index.js
-    healthCheckPath: /api/trpc/auth.me
+    healthCheckPath: /api/health
     autoDeploy: true
+    disk:
+      name: facingface-media
+      mountPath: /var/data
+      sizeGB: 10
     envVars:
       - key: NODE_ENV
         value: production
@@ -34,18 +34,27 @@ services:
         sync: false
       - key: SMTP_PASS
         sync: false
+
+      # Render-native media storage. These settings replace Forge storage for
+      # all future photos, videos, audio, documents, avatars, and cover images.
+      - key: MEDIA_STORAGE_DRIVER
+        value: disk
+      - key: MEDIA_STORAGE_PATH
+        value: /var/data/media
+      - key: MEDIA_PUBLIC_PATH
+        value: /media
+
+      # These can remain if other FacingFace functions use the Forge APIs for
+      # moderation, maps, or similar services. Production media storage never
+      # reads them and never creates /manus-storage URLs.
       - key: BUILT_IN_FORGE_API_URL
         sync: false
       - key: BUILT_IN_FORGE_API_KEY
         sync: false
-      - key: AWS_ACCESS_KEY_ID
-        sync: false
-      - key: AWS_SECRET_ACCESS_KEY
-        sync: false
-      - key: AWS_REGION
-        value: us-east-1
-      - key: AWS_S3_BUCKET
-        sync: false
+
+      # To use S3 or Render-hosted MinIO instead of this disk, set
+      # MEDIA_STORAGE_DRIVER=s3 and add all S3_* variables manually in Render.
+
       - key: VITE_APP_ID
         sync: false
       - key: OAUTH_SERVER_URL

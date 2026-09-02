@@ -1,11 +1,12 @@
 # ─── FacingFace Environment Variables ────────────────────────────────────────
-# Copy this content to a .env file and fill in all values before running.
+# Copy this content to a private .env file for local development only.
+# Never commit an .env file or paste secret values into GitHub, chat, or tickets.
 
 # ── Database ──────────────────────────────────────────────────────────────────
-DATABASE_URL=mysql://user:password@host:3306/facingface
+DATABASE_URL=postgresql://user:password@host:5432/facingface
 
 # ── Authentication ────────────────────────────────────────────────────────────
-JWT_SECRET=your-super-secret-jwt-key-change-this
+JWT_SECRET=replace-with-a-long-random-secret
 
 # ── Email (SMTP) ──────────────────────────────────────────────────────────────
 SMTP_HOST=smtp.gmail.com
@@ -14,27 +15,38 @@ SMTP_SECURE=false
 SMTP_USER=your-gmail@gmail.com
 SMTP_PASS=your-gmail-app-password
 
-# ── File Storage (S3-compatible) ──────────────────────────────────────────────
-AWS_ACCESS_KEY_ID=your-aws-access-key
-AWS_SECRET_ACCESS_KEY=your-aws-secret-key
-AWS_REGION=us-east-1
-AWS_S3_BUCKET=facingface-media
+# ── Media storage: Render persistent disk (recommended on Render) ─────────────
+# Attach a Render persistent disk at /var/data before setting production mode.
+MEDIA_STORAGE_DRIVER=disk
+MEDIA_STORAGE_PATH=/var/data/media
+MEDIA_PUBLIC_PATH=/media
 
-# ── LLM / AI (for content moderation) ────────────────────────────────────────
-BUILT_IN_FORGE_API_URL=https://api.openai.com/v1
-BUILT_IN_FORGE_API_KEY=sk-your-openai-api-key
+# ── Alternative media storage: S3-compatible ──────────────────────────────────
+# Use only when MEDIA_STORAGE_DRIVER=s3. This also supports Render-hosted MinIO.
+# S3_ENDPOINT=https://s3.example.com
+# S3_BUCKET=facingface-media
+# S3_REGION=us-east-1
+# S3_ACCESS_KEY_ID=your-storage-access-key
+# S3_SECRET_ACCESS_KEY=your-storage-secret
+# S3_PUBLIC_URL=https://media.example.com/facingface-media
+# S3_FORCE_PATH_STYLE=false
+
+# ── LLM / AI (non-media functions, optional) ──────────────────────────────────
+# These values are not used by Render production image uploads or image serving.
+BUILT_IN_FORGE_API_URL=
+BUILT_IN_FORGE_API_KEY=
 
 # ── Manus OAuth (optional) ────────────────────────────────────────────────────
-VITE_APP_ID=your-manus-app-id
+VITE_APP_ID=
 OAUTH_SERVER_URL=https://api.manus.im
 VITE_OAUTH_PORTAL_URL=https://manus.im
-OWNER_OPEN_ID=your-manus-open-id
-OWNER_NAME=Your Name
+OWNER_OPEN_ID=
+OWNER_NAME=
 
 # ── Analytics (optional) ──────────────────────────────────────────────────────
 VITE_ANALYTICS_ENDPOINT=
 VITE_ANALYTICS_WEBSITE_ID=
 
-# ── Frontend API access ────────────────────────────────────────────────────────
-VITE_FRONTEND_FORGE_API_URL=https://api.openai.com/v1
-VITE_FRONTEND_FORGE_API_KEY=sk-your-openai-api-key
+# ── Frontend API access (optional) ────────────────────────────────────────────
+VITE_FRONTEND_FORGE_API_URL=
+VITE_FRONTEND_FORGE_API_KEY=

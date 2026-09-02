@@ -11,7 +11,7 @@ Before deploying, you need the following services provisioned:
 | Service | Purpose | Recommended Provider |
 |---|---|---|
 | MySQL 8.0+ or TiDB | Primary database | PlanetScale, TiDB Cloud, Railway MySQL, or self-hosted |
-| S3-compatible storage | Media file uploads (photos, video, audio, docs) | AWS S3, Cloudflare R2, Backblaze B2 |
+| Render persistent disk or S3-compatible storage | Media file uploads (photos, video, audio, docs) | Render persistent disk (included in this blueprint), Render-hosted MinIO, AWS S3, Cloudflare R2 |
 | SMTP email | Email verification on registration | Gmail App Password, SendGrid, Mailgun |
 | OpenAI-compatible LLM API | Sexual content moderation | OpenAI, Groq, or any OpenAI-compatible endpoint |
 
@@ -47,18 +47,23 @@ cp docs/env-template.txt .env
 | `SMTP_SECURE` | `true` for port 465, `false` for port 587 |
 | `SMTP_USER` | SMTP username / email address |
 | `SMTP_PASS` | SMTP password or App Password |
-| `AWS_ACCESS_KEY_ID` | S3 access key |
-| `AWS_SECRET_ACCESS_KEY` | S3 secret key |
-| `AWS_REGION` | S3 region (e.g. `us-east-1`) |
-| `AWS_S3_BUCKET` | S3 bucket name for media uploads |
-| `BUILT_IN_FORGE_API_URL` | LLM API base URL (e.g. `https://api.openai.com/v1`) |
-| `BUILT_IN_FORGE_API_KEY` | LLM API key |
+| `MEDIA_STORAGE_DRIVER` | Set to `disk` for the Render persistent-disk configuration included with this project. Set to `s3` only when deliberately using an S3-compatible object store. |
+| `MEDIA_STORAGE_PATH` | For the Render disk mode, set to `/var/data/media`. |
+| `MEDIA_PUBLIC_PATH` | For the Render disk mode, set to `/media`. New upload URLs will start with this path. |
+| `BUILT_IN_FORGE_API_URL` | Optional API base URL for non-media functions such as configured AI services. It is **not** used for production media storage. |
+| `BUILT_IN_FORGE_API_KEY` | Optional key for the non-media Forge API functions. It is **not** used for production media storage. |
 
 ### Optional Variables
 
 | Variable | Description |
 |---|---|
-| `AWS_ENDPOINT_URL` | Custom S3-compatible endpoint (Cloudflare R2, MinIO, etc.) |
+| `S3_ENDPOINT` | S3-compatible endpoint when `MEDIA_STORAGE_DRIVER=s3`. |
+| `S3_BUCKET` | Bucket name when `MEDIA_STORAGE_DRIVER=s3`. |
+| `S3_REGION` | Region when `MEDIA_STORAGE_DRIVER=s3` (for example `us-east-1`). |
+| `S3_ACCESS_KEY_ID` | S3-compatible access key when `MEDIA_STORAGE_DRIVER=s3`. |
+| `S3_SECRET_ACCESS_KEY` | S3-compatible secret when `MEDIA_STORAGE_DRIVER=s3`. |
+| `S3_PUBLIC_URL` | Browser-accessible base URL for uploaded objects when `MEDIA_STORAGE_DRIVER=s3`. |
+| `S3_FORCE_PATH_STYLE` | Set to `true` for many MinIO deployments; otherwise leave `false`. |
 | `VITE_APP_ID` | Manus OAuth app ID (only needed if using Manus login) |
 | `OAUTH_SERVER_URL` | Manus OAuth server URL |
 | `VITE_OAUTH_PORTAL_URL` | Manus OAuth portal URL |
