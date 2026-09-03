@@ -336,9 +336,18 @@ import {
   trackAdEvent,
   getAdStats,
   getSuggestedUsers,
+  getInactiveReminderSummary,
 } from "./db";
 import { stripe, getOrCreateBadgePrice } from "./stripe";
-import { sendVerificationEmail, sendPasswordResetEmail, sendSupportMessageEmail, sendLoginLockoutEmail, sendReportEmail } from "./email";
+import {
+  getEmailDeliveryConfig,
+  sendInactiveUserReminderEmail,
+  sendVerificationEmail,
+  sendPasswordResetEmail,
+  sendSupportMessageEmail,
+  sendLoginLockoutEmail,
+  sendReportEmail,
+} from "./email";
 import { generateTotpSecret, buildTotpUri, generateQrCode, verifyTotpCode, generateBackupCodes, consumeBackupCode } from "./totp";
 import { loginLimiter, registerLimiter } from "./rateLimit";
 import {
@@ -4154,14 +4163,68 @@ const suggestionsRouter = router({
 });
 
 const inactiveRemindersRouter = router({
+  status: protectedProcedure
+    .query(async ({ ctx }) => {
+      if (ctx.user?.role !== "super_admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only super admins can view reminder status." });
+      }
+      const [summary, email] = await Promise.all([
+        getInactiveReminderSummary(),
+        Promise.resolve(getEmailDeliveryConfig()),
+      ]);
+      return { summary, email };
+    }),
+
   trigger: protectedProcedure
     .mutation(async ({ ctx }) => {
       if (ctx.user?.role !== "super_admin") {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Only super admins can trigger reminders" });
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only super admins can trigger reminders." });
       }
       const { sendInactiveUserReminders } = await import("./inactiveUserReminder");
-      await sendInactiveUserReminders();
-      return { success: true, message: "Inactive user reminders job started" };
+      return sendInactiveUserReminders();
+    }),
+
+  sendTest: protectedProcedure
+    .mutation(async ({ ctx }) => {
+      if (ctx.user?.role !== "super_admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only super admins can send a reminder test." });
+      }
+
+      const emailConfig = getEmailDeliveryConfig();
+      if (!emailConfig.configured) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "SMTP is not configured. Add the Gmail SMTP values in Render before sending a test.",
+        });
+      }
+
+      // Do not expose a free-form recipient field. The test is deliberately
+      // limited to the configured owner inbox, which defaults to SMTP_USER.
+      const recipient = process.env.SMTP_TEST_RECIPIENT?.trim() || process.env.SMTP_USER?.trim();
+      if (!recipient || !z.string().email().safeParse(recipient).success) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Set SMTP_TEST_RECIPIENT to a valid owner email address in Render.",
+        });
+      }
+
+      try {
+        const receipt = await sendInactiveUserReminderEmail({
+          to: recipient,
+          name: "FacingFace Admin",
+          isTest: true,
+        });
+        if (receipt.accepted.length === 0 || receipt.rejected.length > 0) {
+          throw new Error("SMTP did not accept the test recipient.");
+        }
+        return { success: true, recipient, sender: receipt.from, messageId: receipt.messageId };
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: `Reminder test email failed: ${detail}`,
+        });
+      }
     }),
 });
 

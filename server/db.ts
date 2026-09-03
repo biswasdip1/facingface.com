@@ -4678,51 +4678,141 @@ export async function getCommentReactionUsers(commentId: number, reaction: strin
 
 
 // ─── Inactive User Reminders ────────────────────────────────────────────────
-export async function getInactiveUsers(inactiveDays: number = 14): Promise<{id: number; name: string | null; email: string | null}[]> {
-  const db = await getDb();
-  if (!db) return [];
-  
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - inactiveDays);
-  
-  // Find users whose last activity (posts, comments, likes) is older than cutoffDate
-  // and who haven't already received a reminder recently
-  return db.select({ id: users.id, name: users.name, email: users.email })
-    .from(users)
-    .leftJoin(inactiveUserReminders, eq(users.id, inactiveUserReminders.userId))
-    .where(and(
-      lt(users.createdAt, cutoffDate),
-      isNull(inactiveUserReminders.id) // Not sent reminder yet
-    ))
-    .limit(100);
+export const INACTIVE_REMINDER_DAYS = 14;
+export const INACTIVE_REMINDER_REPEAT_DAYS = 30;
+export const INACTIVE_REMINDER_BATCH_LIMIT = 100;
+
+export type InactiveReminderCandidate = {
+  id: number;
+  name: string | null;
+  email: string | null;
+  lastSeenAt: Date;
+};
+
+export type InactiveReminderSummary = {
+  inactiveUsers: number;
+  eligibleUsers: number;
+  remindersSentLast30Days: number;
+  latestReminderAt: Date | null;
+  batchLimit: number;
+};
+
+function dateDaysAgo(days: number): Date {
+  const value = new Date();
+  value.setDate(value.getDate() - days);
+  return value;
 }
 
-export async function recordInactiveUserReminder(userId: number, lastActivityAt?: Date): Promise<void> {
+/**
+ * Finds users who have not used the site for the configured period and have
+ * not received an inactivity reminder in the last 30 days. `lastSeenAt` is
+ * maintained by the authenticated presence path, unlike `createdAt`.
+ */
+export async function getInactiveUsers(
+  inactiveDays: number = INACTIVE_REMINDER_DAYS,
+  reminderRepeatDays: number = INACTIVE_REMINDER_REPEAT_DAYS,
+): Promise<InactiveReminderCandidate[]> {
   const db = await getDb();
-  if (!db) return;
-  
+  if (!db) return [];
+
+  const inactiveCutoff = dateDaysAgo(inactiveDays);
+  const reminderCutoff = dateDaysAgo(reminderRepeatDays);
+  const recentReminderExists = sql`EXISTS (
+    SELECT 1 FROM ${inactiveUserReminders}
+    WHERE ${inactiveUserReminders.userId} = ${users.id}
+      AND ${inactiveUserReminders.emailSentAt} >= ${reminderCutoff}
+  )`;
+
+  return db.select({
+    id: users.id,
+    name: users.name,
+    email: users.email,
+    lastSeenAt: users.lastSeenAt,
+  })
+    .from(users)
+    .where(and(
+      lt(users.lastSeenAt, inactiveCutoff),
+      isNotNull(users.email),
+      ne(users.role, "super_admin"),
+      sql`NOT (${recentReminderExists})`,
+    ))
+    .orderBy(asc(users.lastSeenAt))
+    .limit(INACTIVE_REMINDER_BATCH_LIMIT);
+}
+
+export async function getInactiveReminderSummary(): Promise<InactiveReminderSummary> {
+  const db = await getDb();
+  if (!db) {
+    return {
+      inactiveUsers: 0,
+      eligibleUsers: 0,
+      remindersSentLast30Days: 0,
+      latestReminderAt: null,
+      batchLimit: INACTIVE_REMINDER_BATCH_LIMIT,
+    };
+  }
+
+  const inactiveCutoff = dateDaysAgo(INACTIVE_REMINDER_DAYS);
+  const reminderCutoff = dateDaysAgo(INACTIVE_REMINDER_REPEAT_DAYS);
+  const recentReminderExists = sql`EXISTS (
+    SELECT 1 FROM ${inactiveUserReminders}
+    WHERE ${inactiveUserReminders.userId} = ${users.id}
+      AND ${inactiveUserReminders.emailSentAt} >= ${reminderCutoff}
+  )`;
+
+  const [inactiveResult] = await db.select({ count: sql<number>`count(*)::int` })
+    .from(users)
+    .where(and(lt(users.lastSeenAt, inactiveCutoff), ne(users.role, "super_admin")));
+
+  const [eligibleResult] = await db.select({ count: sql<number>`count(*)::int` })
+    .from(users)
+    .where(and(
+      lt(users.lastSeenAt, inactiveCutoff),
+      isNotNull(users.email),
+      ne(users.role, "super_admin"),
+      sql`NOT (${recentReminderExists})`,
+    ));
+
+  const [sentResult] = await db.select({
+    count: sql<number>`count(*)::int`,
+    latest: sql<Date | null>`max(${inactiveUserReminders.emailSentAt})`,
+  })
+    .from(inactiveUserReminders)
+    .where(gte(inactiveUserReminders.emailSentAt, reminderCutoff));
+
+  return {
+    inactiveUsers: inactiveResult?.count ?? 0,
+    eligibleUsers: eligibleResult?.count ?? 0,
+    remindersSentLast30Days: sentResult?.count ?? 0,
+    latestReminderAt: sentResult?.latest ?? null,
+    batchLimit: INACTIVE_REMINDER_BATCH_LIMIT,
+  };
+}
+
+export async function recordInactiveUserReminder(userId: number, lastActivityAt: Date): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable; reminder delivery was not recorded.");
+
   await db.insert(inactiveUserReminders).values({
     userId,
     emailSentAt: new Date(),
-    lastActivityAt: lastActivityAt || new Date(),
+    lastActivityAt,
     reminderType: "14_days_inactive",
   });
 }
 
-export async function hasRecentReminder(userId: number, days: number = 30): Promise<boolean> {
+export async function hasRecentReminder(userId: number, days: number = INACTIVE_REMINDER_REPEAT_DAYS): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
-  
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - days);
-  
-  const result = await db.select()
+  const cutoffDate = dateDaysAgo(days);
+
+  const result = await db.select({ id: inactiveUserReminders.id })
     .from(inactiveUserReminders)
     .where(and(
       eq(inactiveUserReminders.userId, userId),
-      gte(inactiveUserReminders.emailSentAt, cutoffDate)
+      gte(inactiveUserReminders.emailSentAt, cutoffDate),
     ))
     .limit(1);
-  
+
   return result.length > 0;
 }

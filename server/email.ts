@@ -8,35 +8,77 @@ import nodemailer from "nodemailer";
 
 let _transporter: nodemailer.Transporter | null = null;
 
+export type EmailDeliveryConfig = {
+  configured: boolean;
+  provider: "smtp" | "development-test";
+  from: string;
+  host: string | null;
+  port: number;
+  secure: boolean;
+};
+
+function getConfiguredFromAddress(): string {
+  const explicitlyConfigured = process.env.SMTP_FROM?.trim();
+  if (explicitlyConfigured) return explicitlyConfigured;
+
+  const smtpUser = process.env.SMTP_USER?.trim();
+  // When Gmail is configured as SMTP_USER, Gmail requires the From address to
+  // match that authenticated account unless a verified alias is configured.
+  if (smtpUser) return `"FacingFace" <${smtpUser}>`;
+
+  return '"FacingFace" <noreply@facingface.com>';
+}
+
+export function getEmailDeliveryConfig(): EmailDeliveryConfig {
+  const host = process.env.SMTP_HOST?.trim() || null;
+  const user = process.env.SMTP_USER?.trim() || null;
+  const pass = process.env.SMTP_PASS?.trim() || null;
+  const port = parseInt(process.env.SMTP_PORT ?? "587", 10);
+  const secure = process.env.SMTP_SECURE === "true";
+  const configured = Boolean(host && user && pass && Number.isInteger(port) && port > 0);
+
+  return {
+    configured,
+    provider: configured ? "smtp" : "development-test",
+    from: getConfiguredFromAddress(),
+    host,
+    port,
+    secure,
+  };
+}
+
 async function getTransporter(): Promise<nodemailer.Transporter> {
   if (_transporter) return _transporter;
 
-  const host = process.env.SMTP_HOST;
-  const port = parseInt(process.env.SMTP_PORT ?? "587", 10);
+  const config = getEmailDeliveryConfig();
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
-  const secure = process.env.SMTP_SECURE === "true";
 
-  if (host && user && pass) {
-    // Production SMTP (e.g. Gmail, SendGrid, Mailgun, etc.)
+  if (config.configured && config.host && user && pass) {
     _transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure,
+      host: config.host,
+      port: config.port,
+      secure: config.secure,
       auth: { user, pass },
     });
-  } else {
-    // Development fallback — Ethereal fake SMTP
-    const testAccount = await nodemailer.createTestAccount();
-    _transporter = nodemailer.createTransport({
-      host: "smtp.ethereal.email",
-      port: 587,
-      secure: false,
-      auth: { user: testAccount.user, pass: testAccount.pass },
-    });
-    console.log("[Email] Using Ethereal test account:", testAccount.user);
+    return _transporter;
   }
 
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "Production email is not configured. Set SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS, and SMTP_FROM in Render before sending email.",
+    );
+  }
+
+  // Local development only: do not silently send test messages in production.
+  const testAccount = await nodemailer.createTestAccount();
+  _transporter = nodemailer.createTransport({
+    host: "smtp.ethereal.email",
+    port: 587,
+    secure: false,
+    auth: { user: testAccount.user, pass: testAccount.pass },
+  });
+  console.log("[Email] Using local Ethereal test account:", testAccount.user);
   return _transporter;
 }
 
@@ -46,7 +88,7 @@ export async function sendVerificationEmail(opts: {
   verifyUrl: string;
 }): Promise<void> {
   const transporter = await getTransporter();
-  const from = process.env.SMTP_FROM ?? '"FacingFace" <noreply@facingface.com>';
+  const from = getConfiguredFromAddress();
 
   const info = await transporter.sendMail({
     from,
@@ -119,7 +161,7 @@ export async function sendPasswordResetEmail(opts: {
   resetUrl: string;
 }): Promise<void> {
   const transporter = await getTransporter();
-  const from = process.env.SMTP_FROM ?? '"FacingFace" <noreply@facingface.com>';
+  const from = getConfiguredFromAddress();
   const info = await transporter.sendMail({
     from,
     to: opts.to,
@@ -191,7 +233,7 @@ export async function sendSupportMessageEmail(opts: {
   whatsapp?: string | null;
 }): Promise<void> {
   const transporter = await getTransporter();
-  const from = process.env.SMTP_FROM ?? '"FacingFace" <noreply@facingface.com>';
+  const from = getConfiguredFromAddress();
   const info = await transporter.sendMail({
     from,
     to: opts.adminEmail,
@@ -212,7 +254,7 @@ export async function sendLoginLockoutEmail(opts: {
   retryAfterSeconds: number;
 }): Promise<void> {
   const transporter = await getTransporter();
-  const from = process.env.SMTP_FROM ?? '"FacingFace" <noreply@facingface.com>';
+  const from = getConfiguredFromAddress();
   const retryMinutes = Math.ceil(opts.retryAfterSeconds / 60);
   const info = await transporter.sendMail({
     from,
@@ -238,7 +280,7 @@ export async function sendReportEmail(opts: {
   contentPreview?: string;
 }): Promise<void> {
   const transporter = await getTransporter();
-  const from = process.env.SMTP_FROM ?? '"FacingFace" <noreply@facingface.com>';
+  const from = getConfiguredFromAddress();
   const adminEmail = "direct.letter@gmail.com";
 
   const reasonLabels: Record<string, string> = {
@@ -267,17 +309,27 @@ export async function sendReportEmail(opts: {
 }
 
 
+export type EmailDeliveryReceipt = {
+  messageId: string;
+  accepted: string[];
+  rejected: string[];
+  from: string;
+};
+
 export async function sendInactiveUserReminderEmail(opts: {
   to: string;
   name: string;
-}): Promise<void> {
+  isTest?: boolean;
+}): Promise<EmailDeliveryReceipt> {
   const transporter = await getTransporter();
-  const from = process.env.SMTP_FROM ?? '"FacingFace" <noreply@facingface.com>';
+  const from = getConfiguredFromAddress();
+  const siteUrl = (process.env.PUBLIC_APP_URL ?? "https://www.facingface.com").replace(/\/+$/, "");
+  const greeting = opts.isTest ? "This is a test of the FacingFace reminder-email service." : "We noticed you haven't been active on FacingFace for a while. We'd love to see you back!";
   const info = await transporter.sendMail({
     from,
     to: opts.to,
-    subject: "We miss you! Come back to FacingFace",
-    text: `Hi ${opts.name},\n\nWe noticed you haven't been active on FacingFace for a while. We'd love to see you back!\n\nVisit FacingFace to catch up with friends, share updates, and stay connected.\n\nhttps://facingface-com.manus.space\n\nThanks,\nThe FacingFace Team`,
+    subject: opts.isTest ? "FacingFace reminder email test" : "We miss you! Come back to FacingFace",
+    text: `Hi ${opts.name},\n\n${greeting}\n\nVisit FacingFace to catch up with friends, share updates, and stay connected.\n\n${siteUrl}\n\nThanks,\nThe FacingFace Team`,
     html: `
 <!DOCTYPE html>
 <html>
@@ -301,10 +353,10 @@ export async function sendInactiveUserReminderEmail(opts: {
             <h2 style="margin:0 0 12px;font-size:22px;color:#1c1e21;">We miss you!</h2>
             <p style="margin:0 0 8px;color:#4b4f56;font-size:15px;line-height:1.6;">Hi <strong>${opts.name}</strong>,</p>
             <p style="margin:0 0 24px;color:#4b4f56;font-size:15px;line-height:1.6;">
-              We noticed you haven't been active on FacingFace for a while. Your friends are sharing updates, and we'd love to see you back in the community!
+              ${opts.isTest ? "This is a test of the FacingFace reminder-email service. If you can read this message, the sender configuration is working." : "We noticed you haven't been active on FacingFace for a while. Your friends are sharing updates, and we'd love to see you back in the community!"}
             </p>
             <div style="text-align:center;margin-bottom:28px;">
-              <a href="https://facingface-com.manus.space"
+              <a href="${siteUrl}"
                  style="display:inline-block;background:#1877f2;color:#fff;font-weight:700;font-size:16px;padding:14px 36px;border-radius:8px;text-decoration:none;">
                 Come Back to FacingFace
               </a>
@@ -331,4 +383,11 @@ export async function sendInactiveUserReminderEmail(opts: {
   if (previewUrl) {
     console.log("[Email] Inactive user reminder preview URL:", previewUrl);
   }
+
+  return {
+    messageId: info.messageId,
+    accepted: info.accepted.map(String),
+    rejected: info.rejected.map(String),
+    from,
+  };
 }

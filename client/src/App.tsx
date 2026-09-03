@@ -95,7 +95,26 @@ function AppLayout() {
   } | null>(null);
   const globalSocketRef = useRef<any>(null);
   const pushSubscribeMutation = trpc.push.subscribe.useMutation();
+  const updatePresenceMutation = trpc.dm.updatePresence.useMutation();
   const { data: vapidData } = trpc.push.vapidPublicKey.useQuery(undefined, { enabled: !!user });
+
+  // Track normal authenticated browsing as activity. Previously this timestamp
+  // was refreshed only in message screens, which could wrongly classify active
+  // members as inactive for email reminders.
+  useEffect(() => {
+    if (!user) return;
+    const touchPresence = () => updatePresenceMutation.mutate();
+    touchPresence();
+    const interval = window.setInterval(touchPresence, 5 * 60 * 1000);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") touchPresence();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [user?.id]);
 
   // Register service worker + subscribe to Web Push on login
   useEffect(() => {

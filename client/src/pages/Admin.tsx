@@ -2274,96 +2274,117 @@ function PeopleYouMayKnowTab() {
 
 // ─── Email Reminders Tab ──────────────────────────────────────────────────────
 function EmailRemindersTab() {
-  const [isLoading, setIsLoading] = useState(false);
-  const [lastTrigger, setLastTrigger] = useState<Date | null>(null);
+  const utils = trpc.useUtils();
+  const { data: status, isLoading: statusLoading, error: statusError } = trpc.inactiveReminders.status.useQuery(undefined, {
+    refetchInterval: 60_000,
+  });
 
-  const handleTriggerReminders = async () => {
-    setIsLoading(true);
-    try {
-      // Call the API to trigger inactive user reminders
-      // This would be connected to your backend endpoint
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate API call
-      
-      setLastTrigger(new Date());
-      toast.success("Email reminders sent successfully to inactive users!");
-    } catch (error) {
-      toast.error("Failed to send email reminders. Please try again.");
-      console.error(error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const runReminders = trpc.inactiveReminders.trigger.useMutation({
+    onSuccess: (result) => {
+      utils.inactiveReminders.status.invalidate();
+      if (result.failed > 0) {
+        toast.error(`Reminder run finished: ${result.sent} sent, ${result.failed} failed.`);
+      } else if (result.sent > 0) {
+        toast.success(`Reminder run finished: ${result.sent} email${result.sent === 1 ? "" : "s"} accepted by SMTP.`);
+      } else {
+        toast.success("Reminder run finished. No eligible inactive users required an email.");
+      }
+    },
+    onError: (error) => toast.error(error.message || "Reminder run could not be started."),
+  });
+
+  const sendTest = trpc.inactiveReminders.sendTest.useMutation({
+    onSuccess: (result) => {
+      toast.success(`Test email accepted for ${result.recipient}. Check Inbox and Spam.`);
+      utils.inactiveReminders.status.invalidate();
+    },
+    onError: (error) => toast.error(error.message || "Test email could not be sent."),
+  });
+
+  const summary = status?.summary;
+  const email = status?.email;
+  const lastRun = runReminders.data;
+  const formatDate = (value: Date | string | null | undefined) => value ? new Date(value).toLocaleString() : "No reminder sent in the last 30 days";
 
   return (
     <div className="space-y-6">
       <div className="rounded-lg border p-6" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }}>
         <div className="flex items-start justify-between gap-4 mb-4">
           <div>
-            <h3 className="text-lg font-bold mb-2">Send Inactive User Reminders</h3>
+            <h3 className="text-lg font-bold mb-2">Inactive User Reminders</h3>
             <p style={{ color: "var(--its-text-muted)" }} className="text-sm">
-              Send re-engagement emails to users who have been inactive for 14+ days.
+              Sends one re-engagement email to each eligible user inactive for 14+ days, with a 30-day repeat safeguard.
             </p>
           </div>
           <Mail size={24} style={{ color: "var(--its-text-muted)" }} />
         </div>
 
+        {statusError && (
+          <div className="mb-4 rounded-lg p-3 text-sm" style={{ backgroundColor: "#fee2e2", color: "#991b1b" }}>
+            Reminder status could not be loaded: {statusError.message}
+          </div>
+        )}
+
         <div className="space-y-4">
           <div className="rounded-lg p-4" style={{ backgroundColor: "var(--its-bg)" }}>
-            <p className="text-sm font-semibold mb-2">Configuration</p>
+            <p className="text-sm font-semibold mb-2">Delivery configuration</p>
             <div className="space-y-2 text-sm" style={{ color: "var(--its-text-muted)" }}>
-              <p>• <strong>Threshold:</strong> 14 days of inactivity</p>
-              <p>• <strong>Frequency:</strong> Can be triggered manually or run daily at 9 AM UTC</p>
-              <p>• <strong>Duplicate Prevention:</strong> Users won't receive reminders more than once per 30 days</p>
-              <p>• <strong>Email Template:</strong> Personalized re-engagement emails with call-to-action</p>
+              <p><strong>Sender:</strong> {email?.from ?? "Checking configuration…"}</p>
+              <p><strong>SMTP status:</strong> {email?.configured ? "Configured and ready for a test" : "Not configured — emails will not be sent"}</p>
+              <p><strong>Frequency:</strong> Manual send is available below. A daily schedule is optional and must be configured separately.</p>
+              <p><strong>Safety:</strong> Test email goes only to the configured owner inbox; the reminder run never sends active users a test message.</p>
             </div>
           </div>
 
-          <div className="flex flex-col gap-3">
-            <button
-              onClick={handleTriggerReminders}
-              disabled={isLoading}
-              className="w-full px-6 py-3 rounded-lg font-bold text-white transition-opacity"
-              style={{
-                backgroundColor: "var(--its-red)",
-                opacity: isLoading ? 0.6 : 1,
-                cursor: isLoading ? "not-allowed" : "pointer",
-              }}
-            >
-              {isLoading ? "Sending Reminders..." : "Send Reminders Now"}
-            </button>
+          {!statusLoading && email && !email.configured && (
+            <div className="rounded-lg p-3 text-sm" style={{ backgroundColor: "#fef3c7", color: "#92400e" }}>
+              Configure Gmail SMTP in Render before using either button. The system will show a real error instead of claiming success.
+            </div>
+          )}
 
-            {lastTrigger && (
-              <div className="p-3 rounded-lg" style={{ backgroundColor: "#dcfce7", color: "#166534" }}>
-                <p className="text-sm font-semibold">✓ Last triggered: {lastTrigger.toLocaleString()}</p>
-              </div>
-            )}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <button
+              onClick={() => sendTest.mutate()}
+              disabled={sendTest.isPending || runReminders.isPending || !email?.configured}
+              className="px-6 py-3 rounded-lg font-bold border transition-opacity"
+              style={{ borderColor: "var(--its-red)", color: "var(--its-red)", opacity: sendTest.isPending || runReminders.isPending || !email?.configured ? 0.55 : 1, cursor: sendTest.isPending || runReminders.isPending || !email?.configured ? "not-allowed" : "pointer" }}
+            >
+              {sendTest.isPending ? "Sending Test…" : "Send Test to Owner Inbox"}
+            </button>
+            <button
+              onClick={() => runReminders.mutate()}
+              disabled={runReminders.isPending || sendTest.isPending || !email?.configured}
+              className="px-6 py-3 rounded-lg font-bold text-white transition-opacity"
+              style={{ backgroundColor: "var(--its-red)", opacity: runReminders.isPending || sendTest.isPending || !email?.configured ? 0.55 : 1, cursor: runReminders.isPending || sendTest.isPending || !email?.configured ? "not-allowed" : "pointer" }}
+            >
+              {runReminders.isPending ? "Sending Reminders…" : "Send Eligible Reminders Now"}
+            </button>
           </div>
+
+          {lastRun && (
+            <div className="rounded-lg p-3 text-sm" style={{ backgroundColor: lastRun.failed > 0 ? "#fef3c7" : "#dcfce7", color: lastRun.failed > 0 ? "#92400e" : "#166534" }}>
+              <p className="font-semibold">Last run: {formatDate(lastRun.completedAt)}</p>
+              <p>Eligible: {lastRun.eligibleUsers} · Sent: {lastRun.sent} · Skipped: {lastRun.skipped} · Failed: {lastRun.failed}</p>
+              {lastRun.errors[0] && <p className="mt-1">First error: {lastRun.errors[0]}</p>}
+            </div>
+          )}
         </div>
       </div>
 
       <div className="rounded-lg border p-6" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }}>
-        <h3 className="text-lg font-bold mb-4">Recent Reminder Activity</h3>
+        <h3 className="text-lg font-bold mb-4">Current Reminder Activity</h3>
         <div className="space-y-3">
           <div className="flex items-center justify-between p-3 rounded-lg" style={{ backgroundColor: "var(--its-bg)" }}>
-            <div>
-              <p className="text-sm font-semibold">Inactive users identified</p>
-              <p style={{ color: "var(--its-text-muted)" }} className="text-xs">Users with 14+ days inactivity</p>
-            </div>
-            <p className="text-lg font-bold">—</p>
+            <div><p className="text-sm font-semibold">Inactive users identified</p><p style={{ color: "var(--its-text-muted)" }} className="text-xs">No activity for 14+ days</p></div>
+            <p className="text-lg font-bold">{statusLoading ? "…" : summary?.inactiveUsers ?? "—"}</p>
           </div>
           <div className="flex items-center justify-between p-3 rounded-lg" style={{ backgroundColor: "var(--its-bg)" }}>
-            <div>
-              <p className="text-sm font-semibold">Emails sent</p>
-              <p style={{ color: "var(--its-text-muted)" }} className="text-xs">Successful deliveries</p>
-            </div>
-            <p className="text-lg font-bold">—</p>
+            <div><p className="text-sm font-semibold">Eligible now</p><p style={{ color: "var(--its-text-muted)" }} className="text-xs">Has email and no reminder in the past 30 days</p></div>
+            <p className="text-lg font-bold">{statusLoading ? "…" : summary?.eligibleUsers ?? "—"}</p>
           </div>
           <div className="flex items-center justify-between p-3 rounded-lg" style={{ backgroundColor: "var(--its-bg)" }}>
-            <div>
-              <p className="text-sm font-semibold">Skipped</p>
-              <p style={{ color: "var(--its-text-muted)" }} className="text-xs">Already sent recently or no email</p>
-            </div>
-            <p className="text-lg font-bold">—</p>
+            <div><p className="text-sm font-semibold">Reminders sent in last 30 days</p><p style={{ color: "var(--its-text-muted)" }} className="text-xs">Last accepted reminder: {formatDate(summary?.latestReminderAt)}</p></div>
+            <p className="text-lg font-bold">{statusLoading ? "…" : summary?.remindersSentLast30Days ?? "—"}</p>
           </div>
         </div>
       </div>
@@ -2371,29 +2392,8 @@ function EmailRemindersTab() {
       <div className="rounded-lg border p-6" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }}>
         <h3 className="text-lg font-bold mb-4">Email Template Preview</h3>
         <div className="rounded-lg overflow-hidden border" style={{ borderColor: "var(--its-border)" }}>
-          <div style={{ backgroundColor: "#1877f2", padding: "20px", textAlign: "center" }}>
-            <div style={{ display: "inline-flex", alignItems: "center", gap: "10px" }}>
-              <div style={{ background: "#e63329", width: "44px", height: "44px", borderRadius: "8px", display: "inline-block", textAlign: "center", lineHeight: "44px", fontWeight: "900", fontSize: "16px", color: "#fff" }}>FF</div>
-              <span style={{ fontSize: "26px", fontWeight: "900", color: "#fff", letterSpacing: "-1px" }}>FacingFace</span>
-            </div>
-          </div>
-          <div style={{ padding: "20px", backgroundColor: "#f9f9f9" }}>
-            <h4 style={{ margin: "0 0 12px", fontSize: "18px", fontWeight: "bold", color: "#1c1e21" }}>We miss you!</h4>
-            <p style={{ margin: "0 0 12px", color: "#4b4f56", fontSize: "14px", lineHeight: "1.6" }}>
-              Hi Friend,
-            </p>
-            <p style={{ margin: "0 0 12px", color: "#4b4f56", fontSize: "14px", lineHeight: "1.6" }}>
-              We noticed you haven't been active on FacingFace for a while. Come back and catch up with your friends, check out new posts, and share what's on your mind.
-            </p>
-            <div style={{ textAlign: "center", marginBottom: "16px" }}>
-              <a href="#" style={{ display: "inline-block", backgroundColor: "#1877f2", color: "#fff", fontWeight: "700", fontSize: "14px", padding: "10px 24px", borderRadius: "6px", textDecoration: "none" }}>
-                Visit FacingFace
-              </a>
-            </div>
-            <p style={{ margin: "0", color: "#8a8d91", fontSize: "12px" }}>
-              © 2026 FacingFace. All rights reserved.
-            </p>
-          </div>
+          <div style={{ backgroundColor: "#1877f2", padding: "20px", textAlign: "center" }}><div style={{ display: "inline-flex", alignItems: "center", gap: "10px" }}><div style={{ background: "#e63329", width: "44px", height: "44px", borderRadius: "8px", display: "inline-block", textAlign: "center", lineHeight: "44px", fontWeight: "900", fontSize: "16px", color: "#fff" }}>FF</div><span style={{ fontSize: "26px", fontWeight: "900", color: "#fff", letterSpacing: "-1px" }}>FacingFace</span></div></div>
+          <div style={{ padding: "20px", backgroundColor: "#f9f9f9" }}><h4 style={{ margin: "0 0 12px", fontSize: "18px", fontWeight: "bold", color: "#1c1e21" }}>We miss you!</h4><p style={{ margin: "0 0 12px", color: "#4b4f56", fontSize: "14px", lineHeight: "1.6" }}>Hi Friend,</p><p style={{ margin: "0 0 12px", color: "#4b4f56", fontSize: "14px", lineHeight: "1.6" }}>We noticed you have not been active on FacingFace for a while. Come back and catch up with friends, check new posts, and share what is on your mind.</p><div style={{ textAlign: "center", marginBottom: "16px" }}><span style={{ display: "inline-block", backgroundColor: "#1877f2", color: "#fff", fontWeight: "700", fontSize: "14px", padding: "10px 24px", borderRadius: "6px" }}>Come Back to FacingFace</span></div><p style={{ margin: 0, color: "#8a8d91", fontSize: "12px" }}>© 2026 FacingFace. All rights reserved.</p></div>
         </div>
       </div>
     </div>

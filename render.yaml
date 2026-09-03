@@ -34,6 +34,14 @@ services:
         sync: false
       - key: SMTP_PASS
         sync: false
+      # Gmail sender identity. SMTP_USER must be the same Gmail account unless
+      # Gmail has a separately verified sending alias.
+      - key: SMTP_FROM
+        value: '"FacingFace" <direct.letter@gmail.com>'
+      - key: SMTP_TEST_RECIPIENT
+        value: direct.letter@gmail.com
+      - key: PUBLIC_APP_URL
+        value: https://www.facingface.com
 
       # Render-native media storage: photos, videos, audio, documents, profile
       # pictures, Page covers, and Public Group covers are stored under /var/data.
