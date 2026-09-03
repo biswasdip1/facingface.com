@@ -10,7 +10,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { initLiveStreamSocket } from "../liveStream";
 import { registerStripeWebhook } from "../stripeWebhook";
-import { deleteExpiredStories, getDb } from "../db";
+import { deleteExpiredStories, ensureInactiveReminderStorage, getDb } from "../db";
 import { runAllSeeds } from "../seed";
 import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
@@ -66,6 +66,9 @@ async function startServer() {
   } else if (process.env.DATABASE_URL) {
     console.info("[DB] Startup migrations skipped; existing production database retained.");
   }
+  // Creates only the missing reminder-history table and indexes for legacy
+  // production databases. This remains safe while global migrations are off.
+  await ensureInactiveReminderStorage();
   // Seed super admin account and media limits on first startup (no-op if already exists)
   await runAllSeeds();
   const app = express();

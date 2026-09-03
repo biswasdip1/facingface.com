@@ -199,6 +199,46 @@ export async function getDb() {
   return _db;
 }
 
+/**
+ * The existing Render database intentionally skips the old global migration
+ * journal because its history contains an unrelated duplicate enum. This
+ * narrow, idempotent compatibility check creates only the reminder history
+ * table introduced after that database was first deployed. It never alters
+ * users, posts, media, Pages, Groups, or any existing row.
+ */
+export async function ensureInactiveReminderStorage(): Promise<boolean> {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[InactiveUserReminder] Reminder history unavailable: database is not connected.");
+    return false;
+  }
+
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "inactiveUserReminders" (
+        "id" serial PRIMARY KEY NOT NULL,
+        "userId" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+        "emailSentAt" timestamp DEFAULT now() NOT NULL,
+        "lastActivityAt" timestamp,
+        "reminderType" varchar(50) DEFAULT '14_days_inactive' NOT NULL
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "inactiveUserReminders_userId_idx"
+      ON "inactiveUserReminders" ("userId")
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS "inactiveUserReminders_emailSentAt_idx"
+      ON "inactiveUserReminders" ("emailSentAt")
+    `);
+    console.info("[InactiveUserReminder] Reminder history storage is ready.");
+    return true;
+  } catch (error) {
+    console.error("[InactiveUserReminder] Could not prepare reminder history storage:", error);
+    return false;
+  }
+}
+
 // ─── Users ───────────────────────────────────────────────────────────────────
 
 export async function upsertUser(user: InsertUser): Promise<void> {
