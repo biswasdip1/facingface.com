@@ -585,6 +585,13 @@ export async function deleteComment(id: number, authorId: number): Promise<void>
   await db.delete(comments).where(and(eq(comments.id, id), eq(comments.authorId, authorId)));
 }
 
+/** Removes one specific comment after an authenticated administrator has reviewed its report. */
+export async function adminDeleteComment(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(comments).where(eq(comments.id, id));
+}
+
 export async function getCommentById(id: number): Promise<Comment | undefined> {
   const db = await getDb();
   if (!db) return undefined;
@@ -3510,6 +3517,14 @@ export async function getContentReports(opts: {
     .orderBy(desc(contentReports.createdAt))
     .limit(opts.limit ?? 50)
     .offset(opts.offset ?? 0);
+}
+
+/** Retrieves the exact report selected by an administrator. */
+export async function getContentReportById(id: number): Promise<ContentReport | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select().from(contentReports).where(eq(contentReports.id, id)).limit(1);
+  return rows[0];
 }
 
 export async function updateContentReport(

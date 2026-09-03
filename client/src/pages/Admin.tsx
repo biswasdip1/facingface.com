@@ -301,11 +301,25 @@ function ReportsTab() {
   const { data: reports, isLoading } = trpc.admin.getReports.useQuery({ status: statusFilter, targetType: typeFilter, limit: 100, offset: 0 });
 
   const reviewMutation = trpc.admin.reviewReport.useMutation({
-    onSuccess: () => { utils.admin.getReports.invalidate(); toast.success("Report updated."); setNoteId(null); setNoteText(""); },
+    onSuccess: (result) => {
+      utils.admin.getReports.invalidate();
+      utils.admin.flaggedPosts.invalidate();
+      toast.success(result.removedContent ? "Reported content removed." : "Report updated.");
+      setNoteId(null);
+      setNoteText("");
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const flagMutation = trpc.admin.flagReportedPost.useMutation({
+    onSuccess: () => {
+      utils.admin.getReports.invalidate();
+      utils.admin.flaggedPosts.invalidate();
+      toast.success("Post added to Flagged Posts for review.");
+    },
     onError: (e) => toast.error(e.message),
   });
   const respondMutation = trpc.admin.respondToReporter.useMutation({
-    onSuccess: () => { utils.admin.getReports.invalidate(); toast.success("Response sent to reporter."); setRespondId(null); setRespondMsg(""); },
+    onSuccess: () => { utils.admin.getReports.invalidate(); toast.success("Response accepted for delivery by email."); setRespondId(null); setRespondMsg(""); },
     onError: (e) => toast.error(e.message),
   });
   const bulkMutation = trpc.admin.bulkReviewReports.useMutation({
@@ -361,13 +375,13 @@ function ReportsTab() {
             />
             <div className="flex gap-2">
               <button onClick={() => setRespondId(null)} className="flex-1 py-2 rounded text-sm border" style={{ borderColor: "var(--its-border)", color: "var(--its-text-muted)" }}>Cancel</button>
-              <button
-                onClick={() => respondMutation.mutate({ reportId: respondId, message: respondMsg })}
-                disabled={!respondMsg.trim() || respondMutation.isPending}
-                className="flex-1 py-2 rounded text-sm font-medium bg-blue-600 text-white disabled:opacity-50"
-              >
-                {respondMutation.isPending ? "Sending…" : "Send"}
-              </button>
+                <button
+                  onClick={() => respondMutation.mutate({ reportId: respondId, message: respondMsg })}
+                  disabled={!respondMsg.trim() || respondMutation.isPending}
+                  className="flex-1 py-2 rounded text-sm font-medium bg-blue-600 text-white disabled:opacity-50"
+                >
+                  {respondMutation.isPending ? "Sending…" : "Send Email"}
+                </button>
             </div>
           </div>
         </div>
@@ -526,7 +540,19 @@ function ReportsTab() {
                 </button>
                 {report.status === "pending" && (
                   <>
-                    <button onClick={() => reviewMutation.mutate({ reportId: report.id, status: "actioned", deletePost: report.targetType === "post" })}
+                    {report.targetType === "post" && (
+                      <button onClick={() => flagMutation.mutate({ reportId: report.id })}
+                        disabled={flagMutation.isPending}
+                        className="flex items-center gap-1 px-2 py-1 rounded text-xs disabled:opacity-50"
+                        style={{ backgroundColor: "#fef3c7", color: "#92400e" }}>
+                        <Flag size={12} /> Flag for Review
+                      </button>
+                    )}
+                    <button onClick={() => {
+                      if (window.confirm(`Remove this reported ${report.targetType}? This cannot be undone.`)) {
+                        reviewMutation.mutate({ reportId: report.id, status: "actioned", deleteContent: true });
+                      }
+                    }}
                       disabled={reviewMutation.isPending}
                       className="flex items-center gap-1 px-2 py-1 rounded text-xs disabled:opacity-50"
                       style={{ backgroundColor: "#fee2e2", color: "#991b1b" }}>

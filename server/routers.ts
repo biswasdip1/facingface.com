@@ -83,6 +83,7 @@ import {
   suspendUser,
   isUserSuspended,
   flagPost,
+  adminDeleteComment,
   getMediaPostsDueForWarning,
   schedulePostDeletion,
   getPostsDueForDeletion,
@@ -267,6 +268,7 @@ import {
   setMediaLimit,
   createContentReport,
   getContentReports,
+  getContentReportById,
   updateContentReport,
   adminGetPages,
   adminUpdatePage,
@@ -347,9 +349,11 @@ import {
   sendSupportMessageEmail,
   sendLoginLockoutEmail,
   sendReportEmail,
+  sendReportResponseEmail,
 } from "./email";
 import { generateTotpSecret, buildTotpUri, generateQrCode, verifyTotpCode, generateBackupCodes, consumeBackupCode } from "./totp";
 import { loginLimiter, registerLimiter } from "./rateLimit";
+import { removeReportedContent, wasRecipientAccepted } from "./moderationActions";
 import {
   generateRegistrationOptions,
   verifyRegistrationResponse,
@@ -2242,26 +2246,83 @@ const adminRouter = router({
       return getContentReports(input);
     }),
   reviewReport: adminProcedure
-    .input(z.object({ reportId: z.number(), status: z.enum(["reviewed", "actioned", "dismissed"]), adminNote: z.string().optional(), deletePost: z.boolean().optional() }))
+    .input(z.object({ reportId: z.number(), status: z.enum(["reviewed", "actioned", "dismissed"]), adminNote: z.string().max(2000).optional(), deleteContent: z.boolean().optional() }))
     .mutation(async ({ input, ctx }) => {
-      await updateContentReport(input.reportId, { status: input.status, adminNote: input.adminNote ?? null, reviewedAt: new Date(), reviewedByAdminId: ctx.user.id });
-      if (input.deletePost) {
-        const reports = await getContentReports({ limit: 1, offset: 0 });
-        const report = reports.find((r) => r.id === input.reportId);
-        if (report && report.targetType === "post") await adminDeletePost(report.targetId);
+      const report = await getContentReportById(input.reportId);
+      if (!report) throw new TRPCError({ code: "NOT_FOUND", message: "Report not found." });
+
+      if (input.deleteContent) {
+        await removeReportedContent(report.targetType, report.targetId, ctx.user.id, {
+          deletePost: adminDeletePost,
+          deleteComment: adminDeleteComment,
+          removeListing: async (listingId, adminId) => adminUpdateShopListing(listingId, {
+            status: "removed",
+            isFlagged: true,
+            flagReason: "Removed after a member report",
+            removedByAdminId: adminId,
+          }),
+        });
       }
-      await insertAuditLog({ actorId: ctx.user.id, actorName: ctx.user.name ?? undefined, action: "review_report", metadata: JSON.stringify({ reportId: input.reportId, status: input.status }) });
+      await updateContentReport(report.id, {
+        status: input.deleteContent ? "actioned" : input.status,
+        adminNote: input.adminNote ?? null,
+        reviewedAt: new Date(),
+        reviewedByAdminId: ctx.user.id,
+      });
+      await insertAuditLog({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: input.deleteContent ? "remove_reported_content" : "review_report",
+        metadata: JSON.stringify({ reportId: report.id, targetType: report.targetType, targetId: report.targetId, status: input.deleteContent ? "actioned" : input.status }),
+      });
+      return { success: true, removedContent: Boolean(input.deleteContent) };
+    }),
+  flagReportedPost: adminProcedure
+    .input(z.object({ reportId: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      const report = await getContentReportById(input.reportId);
+      if (!report) throw new TRPCError({ code: "NOT_FOUND", message: "Report not found." });
+      if (report.targetType !== "post") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Only post reports can be moved to Flagged Posts." });
+      }
+      await flagPost(report.targetId, `Reported: ${report.reason}`);
+      await updateContentReport(report.id, { status: "reviewed", reviewedAt: new Date(), reviewedByAdminId: ctx.user.id });
+      await insertAuditLog({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: "flag_reported_post",
+        targetPostId: report.targetId,
+        metadata: JSON.stringify({ reportId: report.id, reason: report.reason }),
+      });
       return { success: true };
     }),
   respondToReporter: adminProcedure
-    .input(z.object({ reportId: z.number(), message: z.string().min(1) }))
+    .input(z.object({ reportId: z.number(), message: z.string().trim().min(1).max(2000) }))
     .mutation(async ({ input, ctx }) => {
-      const reports = await getContentReports({ limit: 1000, offset: 0 });
-      const report = reports.find((r) => r.id === input.reportId);
+      const report = await getContentReportById(input.reportId);
       if (!report) throw new TRPCError({ code: "NOT_FOUND", message: "Report not found." });
-      await createNotification({ userId: report.reporterId, actorId: ctx.user.id, type: "admin_promoted" });
-      await insertAuditLog({ actorId: ctx.user.id, actorName: ctx.user.name ?? undefined, action: "respond_to_reporter", metadata: JSON.stringify({ reportId: input.reportId, message: input.message }) });
-      return { success: true };
+      const reporter = await getUserById(report.reporterId);
+      if (!reporter?.email) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "The reporting member has no email address, so a response cannot be delivered." });
+      }
+      const receipt = await sendReportResponseEmail({
+        to: reporter.email,
+        reporterName: reporter.name,
+        message: input.message,
+        reportId: report.id,
+      });
+      const accepted = wasRecipientAccepted(receipt.accepted, reporter.email);
+      if (!accepted) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Email delivery was not accepted, so no response was recorded." });
+      }
+      await createNotification({ userId: report.reporterId, actorId: ctx.user.id, type: "support_reply" });
+      await insertAuditLog({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: "respond_to_reporter",
+        metadata: JSON.stringify({ reportId: report.id, delivery: "email_accepted", messageLength: input.message.length }),
+      });
+      return { success: true, accepted: receipt.accepted };
     }),
 
   bulkReviewReports: adminProcedure
@@ -2270,19 +2331,23 @@ const adminRouter = router({
       action: z.enum(["dismiss", "action", "delete_content"]),
     }))
     .mutation(async ({ input, ctx }) => {
-      const allReports = await getContentReports({ limit: 1000, offset: 0 });
-      const targets = allReports.filter((r) => input.reportIds.includes(r.id));
-      const statusMap: Record<string, "actioned" | "dismissed"> = {
-        dismiss: "dismissed",
-        action: "actioned",
-        delete_content: "actioned",
-      };
-      const newStatus = statusMap[input.action];
+      const reports = await Promise.all(input.reportIds.map((reportId) => getContentReportById(reportId)));
+      const targets = reports.filter((report): report is NonNullable<typeof report> => Boolean(report));
+      const newStatus = input.action === "dismiss" ? "dismissed" : "actioned";
       for (const report of targets) {
-        await updateContentReport(report.id, { status: newStatus, reviewedAt: new Date(), reviewedByAdminId: ctx.user.id });
-        if (input.action === "delete_content" && report.targetType === "post") {
-          await adminDeletePost(report.targetId);
+        if (input.action === "delete_content") {
+          await removeReportedContent(report.targetType, report.targetId, ctx.user.id, {
+          deletePost: adminDeletePost,
+          deleteComment: adminDeleteComment,
+          removeListing: async (listingId, adminId) => adminUpdateShopListing(listingId, {
+            status: "removed",
+            isFlagged: true,
+            flagReason: "Removed after a member report",
+            removedByAdminId: adminId,
+          }),
+        });
         }
+        await updateContentReport(report.id, { status: newStatus, reviewedAt: new Date(), reviewedByAdminId: ctx.user.id });
       }
       await insertAuditLog({
         actorId: ctx.user.id,

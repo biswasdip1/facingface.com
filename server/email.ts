@@ -316,6 +316,44 @@ export type EmailDeliveryReceipt = {
   from: string;
 };
 
+function escapeEmailHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Sends an administrator's written response to the member who submitted a report. */
+export async function sendReportResponseEmail(opts: {
+  to: string;
+  reporterName: string | null;
+  message: string;
+  reportId: number;
+}): Promise<EmailDeliveryReceipt> {
+  const transporter = await getTransporter();
+  const from = getConfiguredFromAddress();
+  const siteUrl = (process.env.PUBLIC_APP_URL ?? "https://www.facingface.com").replace(/\/+$/, "");
+  const recipientName = opts.reporterName?.trim() || "there";
+  const responseText = opts.message.trim();
+  const safeName = escapeEmailHtml(recipientName);
+  const safeResponse = escapeEmailHtml(responseText).replace(/\n/g, "<br>");
+  const info = await transporter.sendMail({
+    from,
+    to: opts.to,
+    subject: "FacingFace: update on your content report",
+    text: `Hi ${recipientName},\n\nA FacingFace administrator has responded to your report (#${opts.reportId}):\n\n${responseText}\n\nVisit FacingFace: ${siteUrl}\n\nThanks,\nThe FacingFace Team`,
+    html: `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#f0f2f5;font-family:Arial,sans-serif;"><table width="100%" cellpadding="0" cellspacing="0" style="padding:32px 0;background:#f0f2f5;"><tr><td align="center"><table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;"><tr><td style="padding:24px 32px;background:#1a3a5c;color:#ffffff;font-weight:700;font-size:22px;">FacingFace</td></tr><tr><td style="padding:32px;color:#1c1e21;font-size:15px;line-height:1.6;"><p style="margin:0 0 16px;">Hi <strong>${safeName}</strong>,</p><p style="margin:0 0 16px;">A FacingFace administrator has responded to your content report.</p><div style="margin:20px 0;padding:16px;border-left:4px solid #1877f2;background:#f7f8fa;white-space:normal;">${safeResponse}</div><p style="margin:24px 0 0;"><a href="${siteUrl}" style="display:inline-block;padding:11px 20px;background:#1877f2;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:700;">Open FacingFace</a></p></td></tr></table></td></tr></table></body></html>`,
+  });
+  return {
+    messageId: info.messageId,
+    accepted: info.accepted.map(String),
+    rejected: info.rejected.map(String),
+    from,
+  };
+}
+
 export async function sendInactiveUserReminderEmail(opts: {
   to: string;
   name: string;
