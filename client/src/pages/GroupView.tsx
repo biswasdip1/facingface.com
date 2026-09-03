@@ -147,23 +147,6 @@ function GroupPostCard({
         </a>
       )}
 
-      {/* Link preview */}
-      {post.linkUrl && post.linkTitle && (
-        <a
-          href={post.linkUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex gap-3 p-3 border border-border rounded-lg mb-3 hover:bg-accent transition-colors"
-        >
-          {post.linkImage && (
-            <img src={post.linkImage} alt="" className="w-16 h-16 object-cover rounded flex-shrink-0" />
-          )}
-          <div className="min-w-0">
-            <p className="text-xs text-muted-foreground">{post.linkSiteName}</p>
-            <p className="text-sm font-medium line-clamp-2">{post.linkTitle}</p>
-          </div>
-        </a>
-      )}
     </div>
   );
 }
@@ -254,23 +237,28 @@ export default function GroupView() {
 
   const handleCoverChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Reset immediately so a failed upload can be retried with the same file.
+    e.target.value = "";
     if (!file) return;
     if (!file.type.startsWith("image/")) { toast.error("Please select an image."); return; }
     if (file.size > 5 * 1024 * 1024) { toast.error("Image must be under 5 MB."); return; }
+
     setCoverUploading(true);
     try {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64 = (reader.result as string).split(",")[1];
-        uploadCoverMutation.mutate({ handle, base64, mimeType: file.type });
-        setCoverUploading(false);
-      };
-      reader.readAsDataURL(file);
-    } catch {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error("Could not read the selected image."));
+        reader.readAsDataURL(file);
+      });
+      const base64 = dataUrl.split(",")[1];
+      if (!base64) throw new Error("Could not read the selected image.");
+      await uploadCoverMutation.mutateAsync({ handle, base64, mimeType: file.type });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Cover photo upload failed.");
+    } finally {
       setCoverUploading(false);
-      toast.error("Upload failed.");
     }
-    e.target.value = "";
   };
 
   if (groupLoading) {

@@ -587,7 +587,13 @@ export default function Profile() {
               <>
                 {user.coverPhoto && (
                   <button
-                    onClick={() => coverRef.current?.click()}
+                    onClick={(event) => {
+                      // Do not also trigger the parent cover click, which opens the
+                      // full-screen viewer underneath the crop editor.
+                      event.preventDefault();
+                      event.stopPropagation();
+                      coverRef.current?.click();
+                    }}
                     disabled={coverUploading}
                     className="absolute bottom-2 right-2 text-white px-3 py-1.5 text-xs font-bold uppercase tracking-widest transition-colors flex items-center gap-1.5"
                     style={{

@@ -649,7 +649,7 @@ const postsRouter = router({
 
       // Auto-generate video poster at 1s if mediaType=video and no custom poster was provided
       let resolvedPosterUrl: string | null = input.videoPosterUrl ?? null;
-      if (input.mediaType === "video" && input.mediaUrl && !resolvedPosterUrl) {
+      if (input.mediaType === "video" && input.mediaUrl && !resolvedPosterUrl && /^https?:\/\//i.test(input.mediaUrl)) {
         try {
           const { extractVideoFrame } = await import("./videoUtils");
           const { randomUUID } = await import("crypto");
@@ -2862,18 +2862,13 @@ const pagesRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "Post must have text, media, or a document" });
       }
 
-      // Auto-detect URL in text and fetch link preview
-      let linkPreview = null;
-      if (input.text) {
-        const foundUrl = extractFirstUrl(input.text);
-        if (foundUrl) {
-          linkPreview = await fetchLinkPreview(foundUrl);
-        }
-      }
+      // Page posts are deliberately kept out of the personal Feed. The page:<id>
+      // marker is used by getPagePostsByPageId, so do not overwrite it with a
+      // fetched link-preview site name.
 
       // Auto-generate video poster at 1s if mediaType=video and no custom poster was provided
       let resolvedPosterUrl: string | null = input.videoPosterUrl ?? null;
-      if (input.mediaType === "video" && input.mediaUrl && !resolvedPosterUrl) {
+      if (input.mediaType === "video" && input.mediaUrl && !resolvedPosterUrl && /^https?:\/\//i.test(input.mediaUrl)) {
         try {
           const { extractVideoFrame } = await import("./videoUtils");
           const { randomUUID } = await import("crypto");
@@ -2901,11 +2896,11 @@ const pagesRouter = router({
         mediaUrl: input.mediaUrl ?? null,
         mediaType: input.mediaType ?? null,
         isFlagged: false,
-        linkUrl: linkPreview?.url ?? null,
-        linkTitle: linkPreview?.title ?? null,
-        linkDescription: linkPreview?.description ?? null,
-        linkImage: linkPreview?.image ?? null,
-        linkSiteName: linkPreview?.siteName ?? null,
+        linkUrl: null,
+        linkTitle: null,
+        linkDescription: null,
+        linkImage: null,
+        linkSiteName: `page:${page.id}`,
         docUrl: input.docUrl ?? null,
         docName: input.docName ?? null,
         docSize: input.docSize ?? null,
@@ -3164,14 +3159,8 @@ const publicGroupsRouter = router({
       const membership = await getPublicGroupMembership(group.id, ctx.user!.id);
       if (!membership) throw new TRPCError({ code: "FORBIDDEN", message: "Join the group to post." });
 
-      // Auto-detect URL in text and fetch link preview
-      let linkPreview = null;
-      if (input.content) {
-        const foundUrl = extractFirstUrl(input.content);
-        if (foundUrl) {
-          linkPreview = await fetchLinkPreview(foundUrl);
-        }
-      }
+      // Public Group posts remain in their own group timeline. Do not fetch or
+      // attach external link-preview records in this context.
 
       // Auto-generate video poster at 1s if mediaType=video and no custom poster was provided
       let resolvedPosterUrl: string | null = input.videoPosterUrl ?? null;
@@ -3191,7 +3180,7 @@ const publicGroupsRouter = router({
           // Silently fail - YouTube thumbnail is optional
         }
       }
-      if (input.mediaType === "video" && input.mediaUrl && !resolvedPosterUrl) {
+      if (input.mediaType === "video" && input.mediaUrl && !resolvedPosterUrl && /^https?:\/\//i.test(input.mediaUrl)) {
         try {
           const { extractVideoFrame } = await import("./videoUtils");
           const { randomUUID } = await import("crypto");
@@ -3235,11 +3224,11 @@ const publicGroupsRouter = router({
         docSize: input.docSize ?? null,
         docType: input.docType ?? null,
         bgColor: input.bgColor ?? null,
-        linkUrl: linkPreview?.url ?? null,
-        linkTitle: linkPreview?.title ?? null,
-        linkDescription: linkPreview?.description ?? null,
-        linkImage: linkPreview?.image ?? null,
-        linkSiteName: linkPreview?.siteName ?? null,
+        linkUrl: null,
+        linkTitle: null,
+        linkDescription: null,
+        linkImage: null,
+        linkSiteName: null,
       });
 
       // Save hashtags
@@ -4182,7 +4171,8 @@ export const appRouter = router({
     me: publicProcedure.query((opts) => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      // Express expires a cleared cookie automatically; passing maxAge is deprecated.
+      ctx.res.clearCookie(COOKIE_NAME, cookieOptions);
       return { success: true } as const;
     }),
 

@@ -121,9 +121,23 @@ export default function PageView() {
   });
 
   const handleFileUpload = (file: File, type: "logo" | "cover") => {
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please select an image file.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image must be 5 MB or smaller.");
+      return;
+    }
+
     const reader = new FileReader();
-    reader.onload = (e) => {
-      const base64 = (e.target?.result as string).split(",")[1];
+    reader.onerror = () => toast.error("Could not read the selected image.");
+    reader.onload = (event) => {
+      const base64 = String(event.target?.result ?? "").split(",")[1];
+      if (!base64) {
+        toast.error("Could not read the selected image.");
+        return;
+      }
       if (type === "logo") {
         uploadLogoMutation.mutate({ handle, base64, mimeType: file.type });
       } else {

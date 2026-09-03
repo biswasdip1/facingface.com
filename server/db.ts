@@ -468,7 +468,12 @@ export async function getBlockedUserIds(userId: number): Promise<number[]> {
 export async function getFeedPosts(limit = 20, offset = 0, excludeUserIds: number[] = []): Promise<Post[]> {
   const db = await getDb();
   if (!db) return [];
-  const baseWhere = eq(posts.isFlagged, false);
+  // Page posts remain regular posts so existing comments and reactions still
+  // work, but the page:<id> marker keeps them out of the personal Feed.
+  const baseWhere = and(
+    eq(posts.isFlagged, false),
+    sql`(${posts.linkSiteName} IS NULL OR ${posts.linkSiteName} NOT LIKE 'page:%')`,
+  );
   const where = excludeUserIds.length > 0
     ? and(baseWhere, notInArray(posts.authorId, excludeUserIds))
     : baseWhere;

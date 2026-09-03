@@ -24,22 +24,50 @@ const moderationResponseFormat = {
   },
 };
 
+let didReportDisabledModeration = false;
+let didReportProviderFailure = false;
+
+/**
+ * The existing Render deployment has an invalid Forge key. Calling that remote
+ * service for every image both fails open and writes a noisy 401 stack trace.
+ * Explicitly enable moderation only after a valid provider key is configured.
+ */
+export function isContentModerationEnabled(): boolean {
+  return process.env.CONTENT_MODERATION_ENABLED?.trim().toLowerCase() === "true";
+}
+
+function unflagged(): ModerationResult {
+  return { flagged: false, isSexual: false };
+}
+
+function skipWhenDisabled(): ModerationResult {
+  if (!didReportDisabledModeration) {
+    didReportDisabledModeration = true;
+    console.info(
+      "[Moderation] External AI moderation is disabled. Uploads are allowed without an external scan; set CONTENT_MODERATION_ENABLED=true only after configuring a valid provider key.",
+    );
+  }
+  return unflagged();
+}
+
 function parseModerationResponse(response: Awaited<ReturnType<typeof invokeLLM>>): ModerationResult {
   const rawContent = response?.choices?.[0]?.message?.content;
-  if (!rawContent) return { flagged: false, isSexual: false };
+  if (!rawContent) return unflagged();
   const content = typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent);
-  return JSON.parse(content) as ModerationResult;
+  const parsed = JSON.parse(content) as Partial<ModerationResult>;
+  return {
+    flagged: parsed.flagged === true,
+    isSexual: parsed.isSexual === true,
+    ...(parsed.reason ? { reason: parsed.reason } : {}),
+  };
 }
 
 /**
- * Uses the LLM to check if content is appropriate before publishing.
- * Returns { flagged: true, isSexual: true, reason: "..." } for sexual/explicit content.
- * Returns { flagged: true, isSexual: false, reason: "..." } for other violations.
+ * Checks text only when an external provider has been explicitly enabled.
  */
 export async function moderateContent(text: string): Promise<ModerationResult> {
-  if (!text || text.trim().length === 0) {
-    return { flagged: false, isSexual: false };
-  }
+  if (!text || text.trim().length === 0) return unflagged();
+  if (!isContentModerationEnabled()) return skipWhenDisabled();
 
   try {
     const response = await invokeLLM({
@@ -66,34 +94,34 @@ Set isSexual to true ONLY when the primary violation category is "sexual".
 Important Nepali-language context: the word "ठोक्नु" can be a normal non-sexual verb meaning to hit, strike, knock, fix, or do something. Do NOT flag content as sexual only because this word appears. Flag it as sexual only when the surrounding sentence clearly contains explicit sexual content, nudity descriptions, pornography, or sexual solicitation.
 Do not include any other text outside the JSON.`,
         },
-        {
-          role: "user",
-          content: text,
-        },
+        { role: "user", content: text },
       ],
       response_format: moderationResponseFormat,
     });
 
     return parseModerationResponse(response);
-  } catch (err) {
-    console.error("[Moderation] Error calling LLM:", err);
-    // On error, allow content through (fail open) to avoid blocking legitimate users
-    return { flagged: false, isSexual: false };
+  } catch (error) {
+    // Fail open, as before, but report a provider outage only once per process.
+    if (!didReportProviderFailure) {
+      didReportProviderFailure = true;
+      console.warn("[Moderation] Provider request failed; further moderation calls are being skipped until restart.");
+    }
+    return unflagged();
   }
 }
 
 /**
- * Uses the vision-capable LLM to check uploaded image bytes before publishing.
- * Video moderation should call this function on sampled frames extracted from the video.
+ * Uses a vision-capable LLM to scan uploaded image bytes only when explicitly
+ * enabled. Video moderation calls this function for sampled video frames.
  */
 export async function moderateImageBuffer(
   buffer: Buffer,
   mimeType = "image/jpeg",
   context = "uploaded media",
 ): Promise<ModerationResult> {
-  if (!buffer || buffer.length === 0) {
-    return { flagged: false, isSexual: false };
-  }
+  if (!buffer || buffer.length === 0) return unflagged();
+  if (!isContentModerationEnabled()) return skipWhenDisabled();
+  if (didReportProviderFailure) return unflagged();
 
   try {
     const safeMimeType = mimeType.startsWith("image/") ? mimeType : "image/jpeg";
@@ -121,14 +149,8 @@ Set isSexual to true when the visual content includes nudity, pornography, expli
         {
           role: "user",
           content: [
-            {
-              type: "text",
-              text: `Moderate this ${context}.`,
-            },
-            {
-              type: "image_url",
-              image_url: { url: dataUrl, detail: "low" },
-            },
+            { type: "text", text: `Moderate this ${context}.` },
+            { type: "image_url", image_url: { url: dataUrl, detail: "low" } },
           ],
         },
       ],
@@ -136,9 +158,11 @@ Set isSexual to true when the visual content includes nudity, pornography, expli
     });
 
     return parseModerationResponse(response);
-  } catch (err) {
-    console.error("[Moderation] Error checking visual media:", err);
-    // Keep the existing moderation behavior: do not block legitimate uploads if the scanner has a transient provider failure.
-    return { flagged: false, isSexual: false };
+  } catch (error) {
+    if (!didReportProviderFailure) {
+      didReportProviderFailure = true;
+      console.warn("[Moderation] Provider request failed; further moderation calls are being skipped until restart.");
+    }
+    return unflagged();
   }
 }

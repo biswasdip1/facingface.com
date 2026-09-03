@@ -38,25 +38,33 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
-  // Run database migrations on startup — creates all tables if they don't exist
-  if (process.env.DATABASE_URL) {
+  // Existing Render databases must not re-run the full migration history on
+  // every restart. The current production database already contains an enum
+  // that its migration journal does not record, which produces a misleading
+  // duplicate-enum error. For a deliberate one-time migration, set
+  // RUN_DATABASE_MIGRATIONS_ON_STARTUP=true for that deployment only.
+  const shouldRunMigrations =
+    process.env.NODE_ENV !== "production" ||
+    process.env.RUN_DATABASE_MIGRATIONS_ON_STARTUP === "true";
+
+  if (process.env.DATABASE_URL && shouldRunMigrations) {
+    const migrationClient = postgres(process.env.DATABASE_URL, {
+      ssl: { rejectUnauthorized: false },
+      max: 1,
+      connect_timeout: 30,
+    });
     try {
-      const migrationClient = postgres(process.env.DATABASE_URL, {
-        ssl: { rejectUnauthorized: false },
-        max: 1,
-        connect_timeout: 30,
-      });
       const migrationDb = drizzle(migrationClient);
-      // Use the Drizzle output folder from the project root. In production this
-      // file is bundled to dist/index.js, so resolving via __dirname points
-      // outside the app root and prevents migrations from creating feedAds.
       const migrationsFolder = path.resolve(process.cwd(), "drizzle");
       await migrate(migrationDb, { migrationsFolder });
-      await migrationClient.end();
       console.log("[DB] Migrations applied successfully.");
     } catch (err) {
-      console.error("[DB] Migration failed (non-fatal):", err);
+      console.error("[DB] One-time migration failed:", err);
+    } finally {
+      await migrationClient.end();
     }
+  } else if (process.env.DATABASE_URL) {
+    console.info("[DB] Startup migrations skipped; existing production database retained.");
   }
   // Seed super admin account and media limits on first startup (no-op if already exists)
   await runAllSeeds();

@@ -35,8 +35,8 @@ services:
       - key: SMTP_PASS
         sync: false
 
-      # Render-native media storage. These settings replace Forge storage for
-      # all future photos, videos, audio, documents, avatars, and cover images.
+      # Render-native media storage: photos, videos, audio, documents, profile
+      # pictures, Page covers, and Public Group covers are stored under /var/data.
       - key: MEDIA_STORAGE_DRIVER
         value: disk
       - key: MEDIA_STORAGE_PATH
@@ -44,17 +44,24 @@ services:
       - key: MEDIA_PUBLIC_PATH
         value: /media
 
-      # These can remain if other FacingFace functions use the Forge APIs for
-      # moderation, maps, or similar services. Production media storage never
-      # reads them and never creates /manus-storage URLs.
+      # The previously deployed Forge key is invalid outside Manus. Leave the
+      # external moderation switch off unless a valid replacement is deliberately
+      # configured; otherwise every media upload generates a 401 in Render logs.
+      - key: CONTENT_MODERATION_ENABLED
+        value: "false"
+
+      # Existing deployed databases do not re-run a migration history that is
+      # known to contain an already-created enum. Use true once, only for a
+      # deliberate migration after a database backup has been verified.
+      - key: RUN_DATABASE_MIGRATIONS_ON_STARTUP
+        value: "false"
+
+      # Optional non-media Forge functions. These variables are not used for
+      # production file uploads by this archive.
       - key: BUILT_IN_FORGE_API_URL
         sync: false
       - key: BUILT_IN_FORGE_API_KEY
         sync: false
-
-      # To use S3 or Render-hosted MinIO instead of this disk, set
-      # MEDIA_STORAGE_DRIVER=s3 and add all S3_* variables manually in Render.
-
       - key: VITE_APP_ID
         sync: false
       - key: OAUTH_SERVER_URL

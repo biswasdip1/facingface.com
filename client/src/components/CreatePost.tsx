@@ -270,9 +270,12 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
     staleTime: 30_000,
   });
 
+  // Page and Public Group posts stay within their own context. Do not fetch or
+  // display external URL preview cards there; previews remain a main-feed feature.
+  const isContextPost = Boolean(pageHandle || groupHandle);
   const { data: previewData, isFetching: previewLoading } = trpc.linkPreview.fetch.useQuery(
     { url: previewUrl! },
-    { enabled: !!previewUrl && !previewDismissed && !showPoll }
+    { enabled: !isContextPost && !!previewUrl && !previewDismissed && !showPoll }
   );
   const preview = previewData?.preview;
 
@@ -797,7 +800,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
   const isLoading = uploading || createPost.isPending || createPagePost.isPending || createGroupPost.isPending;
 
 
-  const showPreviewCard = !previewDismissed && !showPoll && previewUrl && (previewLoading || preview);
+  const showPreviewCard = !isContextPost && !previewDismissed && !showPoll && previewUrl && (previewLoading || preview);
 
   // Dynamic text styles
   const fontSize = getDynamicFontSize(text);
@@ -880,7 +883,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
             onClick={() => openModal()}
             className="flex-1 text-left px-4 py-2.5 rounded-full border border-border bg-background hover:bg-muted transition-colors text-sm text-muted-foreground font-medium cursor-text flex items-center justify-between gap-2"
           >
-            <span>{pageHandle ? `Post to ${pageName ?? pageHandle}…` : `Start a post, ${user?.name?.split(" ")[0] ?? "share something"}…`}</span>
+            <span>{pageHandle ? `Post to ${pageName ?? pageHandle}…` : groupHandle ? `Post to ${groupName ?? groupHandle}…` : `Start a post, ${user?.name?.split(" ")[0] ?? "share something"}…`}</span>
             {hasSavedDraft && (
               <span className="flex-shrink-0 text-[10px] font-bold uppercase tracking-widest text-[var(--its-red)] border border-[var(--its-red)] px-1.5 py-0.5 rounded-full leading-none">
                 Draft

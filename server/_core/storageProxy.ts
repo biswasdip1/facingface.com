@@ -4,12 +4,12 @@ import { getDiskMediaConfig, resolveLegacyMediaUrl } from "../storage";
 
 /**
  * Registers the public media route for a Render persistent disk and keeps a
- * short compatibility path for existing /manus-storage URLs.
+ * compatibility path for existing /manus-storage URLs.
  *
- * In production we never call Forge here. A legacy URL is redirected only when
- * its object has been restored under the active Render storage key; otherwise a
- * 410 response lets the client show its normal "image unavailable" fallback
- * without repeated invalid-token errors in Render logs.
+ * In production we never call Forge here. A legacy URL redirects only when its
+ * original object has been restored under the same key in active Render storage;
+ * otherwise it returns 410 so the UI can show its existing fallback without
+ * creating repeated invalid-token errors in Render logs.
  */
 export function registerStorageProxy(app: Express) {
   const diskMedia = getDiskMediaConfig();
@@ -37,21 +37,17 @@ export function registerStorageProxy(app: Express) {
 
     const restoredUrl = resolveLegacyMediaUrl(`/manus-storage/${key}`);
     if (restoredUrl) {
-      // The same key must actually have been copied into the configured media
-      // storage. If it has not, the follow-up media route returns 404 and the
-      // browser falls back gracefully without any Forge request.
       res.redirect(302, restoredUrl);
       return;
     }
 
-    // Render production must not use an invalid Manus Forge storage token.
     if (ENV.isProduction) {
       res.status(410).send("Legacy media is unavailable until its original file is restored.");
       return;
     }
 
     // Preserve legacy Forge behaviour only for local Manus development, where
-    // the supplied environment can still provide valid Forge credentials.
+    // valid development credentials may still be present.
     if (!ENV.forgeApiUrl || !ENV.forgeApiKey) {
       res.status(410).send("Legacy media storage is not configured.");
       return;
