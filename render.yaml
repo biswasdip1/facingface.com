@@ -10,7 +10,7 @@ services:
     runtime: node
     plan: starter
     buildCommand: npm install --legacy-peer-deps && npm run build
-    startCommand: node dist/index.js
+    startCommand: node dist/_core/index.js
     healthCheckPath: /api/health
     autoDeploy: true
     disk:
