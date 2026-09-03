@@ -4716,14 +4716,10 @@ export async function getInactiveUsers(
   if (!db) return [];
 
   const inactiveCutoff = dateDaysAgo(inactiveDays);
-  const reminderCutoff = dateDaysAgo(reminderRepeatDays);
-  const recentReminderExists = sql`EXISTS (
-    SELECT 1 FROM ${inactiveUserReminders}
-    WHERE ${inactiveUserReminders.userId} = ${users.id}
-      AND ${inactiveUserReminders.emailSentAt} >= ${reminderCutoff}
-  )`;
-
-  return db.select({
+  // The database receives only direct typed predicates here. The prior
+  // correlated SQL condition was rejected by the live driver's prepared query
+  // path, leaving the entire reminder administration panel unusable.
+  const candidates = await db.select({
     id: users.id,
     name: users.name,
     email: users.email,
@@ -4733,11 +4729,17 @@ export async function getInactiveUsers(
     .where(and(
       lt(users.lastSeenAt, inactiveCutoff),
       isNotNull(users.email),
-      ne(users.role, "super_admin"),
-      sql`NOT (${recentReminderExists})`,
+      inArray(users.role, ["user", "admin"]),
     ))
     .orderBy(asc(users.lastSeenAt))
     .limit(INACTIVE_REMINDER_BATCH_LIMIT);
+
+  const eligible = await Promise.all(candidates.map(async (candidate) => {
+    const recentlyReminded = await hasRecentReminder(candidate.id, reminderRepeatDays);
+    return recentlyReminded ? null : candidate;
+  }));
+
+  return eligible.filter((candidate): candidate is InactiveReminderCandidate => candidate !== null);
 }
 
 export async function getInactiveReminderSummary(): Promise<InactiveReminderSummary> {
@@ -4754,24 +4756,20 @@ export async function getInactiveReminderSummary(): Promise<InactiveReminderSumm
 
   const inactiveCutoff = dateDaysAgo(INACTIVE_REMINDER_DAYS);
   const reminderCutoff = dateDaysAgo(INACTIVE_REMINDER_REPEAT_DAYS);
-  const recentReminderExists = sql`EXISTS (
-    SELECT 1 FROM ${inactiveUserReminders}
-    WHERE ${inactiveUserReminders.userId} = ${users.id}
-      AND ${inactiveUserReminders.emailSentAt} >= ${reminderCutoff}
-  )`;
 
   const [inactiveResult] = await db.select({ count: sql<number>`count(*)::int` })
     .from(users)
-    .where(and(lt(users.lastSeenAt, inactiveCutoff), ne(users.role, "super_admin")));
-
-  const [eligibleResult] = await db.select({ count: sql<number>`count(*)::int` })
-    .from(users)
     .where(and(
       lt(users.lastSeenAt, inactiveCutoff),
-      isNotNull(users.email),
-      ne(users.role, "super_admin"),
-      sql`NOT (${recentReminderExists})`,
+      inArray(users.role, ["user", "admin"]),
     ));
+
+  // Use the exact same safe candidate-and-repeat-window logic as the delivery
+  // process. The UI explicitly identifies this as a bounded sending batch.
+  const eligibleUsers = await getInactiveUsers(
+    INACTIVE_REMINDER_DAYS,
+    INACTIVE_REMINDER_REPEAT_DAYS,
+  );
 
   const [sentResult] = await db.select({
     count: sql<number>`count(*)::int`,
@@ -4782,7 +4780,7 @@ export async function getInactiveReminderSummary(): Promise<InactiveReminderSumm
 
   return {
     inactiveUsers: inactiveResult?.count ?? 0,
-    eligibleUsers: eligibleResult?.count ?? 0,
+    eligibleUsers: eligibleUsers.length,
     remindersSentLast30Days: sentResult?.count ?? 0,
     latestReminderAt: sentResult?.latest ?? null,
     batchLimit: INACTIVE_REMINDER_BATCH_LIMIT,
