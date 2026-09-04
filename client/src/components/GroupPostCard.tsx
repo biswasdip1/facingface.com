@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { formatDistanceToNow } from "date-fns";
 import { ExternalLink, FileText, MessageCircle, Send, Trash2 } from "lucide-react";
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { ReactionBar } from "@/components/PostCard";
+
 
 type GroupAuthor = { id: number; name: string | null; avatar: string | null; isVerified?: boolean };
 
@@ -45,6 +45,74 @@ function initials(value: string | null | undefined) {
 function readableBytes(value: number | null) {
   if (!value) return null;
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+const GROUP_REACTIONS = [
+  { type: "like", emoji: "👍", label: "Like", color: "#1877f2" },
+  { type: "love", emoji: "❤️", label: "Love", color: "#f33e58" },
+  { type: "haha", emoji: "😂", label: "Haha", color: "#f7b125" },
+  { type: "wow", emoji: "😮", label: "Wow", color: "#f7b125" },
+  { type: "sad", emoji: "😢", label: "Sad", color: "#f7b125" },
+  { type: "angry", emoji: "😡", label: "Angry", color: "#e9710f" },
+] as const;
+
+type GroupReaction = typeof GROUP_REACTIONS[number]["type"];
+
+function GroupReactionControl({ groupHandle, postId }: { groupHandle: string; postId: number }) {
+  const { user } = useAuth();
+  const utils = trpc.useUtils();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [hoverTimer, setHoverTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const { data } = trpc.publicGroups.getReactionSummary.useQuery({ handle: groupHandle, postId });
+  const setReaction = trpc.publicGroups.setReaction.useMutation({
+    onSuccess: async () => {
+      await utils.publicGroups.getReactionSummary.invalidate({ handle: groupHandle, postId });
+      setPickerOpen(false);
+    },
+    onError: (error) => toast.error(error.message || "Failed to save reaction. Please try again."),
+  });
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const close = (event: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) setPickerOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [pickerOpen]);
+
+  const counts = data?.counts ?? {};
+  const total = data?.total ?? 0;
+  const reactors = data?.reactors ?? [];
+  const mine = data?.myReaction ?? null;
+  const current = GROUP_REACTIONS.find((reaction) => reaction.type === mine);
+  const choose = (reaction: GroupReaction) => {
+    if (!user || setReaction.isPending) return;
+    setReaction.mutate({ handle: groupHandle, postId, reaction: mine === reaction ? null : reaction });
+  };
+
+  return <div className="flex flex-col gap-2">
+    {total > 0 && <div className="flex items-center gap-1.5 min-w-0">
+      <div className="flex items-center" aria-label={`${total.toLocaleString()} reactions`}>
+        {Object.entries(counts).filter(([, count]) => count > 0).sort(([, a], [, b]) => b - a).slice(0, 3).map(([type], index) => (
+          <span key={type} className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-background border border-border text-[11px] shadow-sm" style={{ marginLeft: index ? "-6px" : 0, zIndex: 3 - index }}>{GROUP_REACTIONS.find((reaction) => reaction.type === type)?.emoji ?? "•"}</span>
+        ))}
+      </div>
+      {reactors.length > 0 && <div className="flex items-center" aria-label={`Recent people who reacted: ${reactors.map((reactor) => reactor.name ?? "Member").join(", ")}`}>
+        {reactors.map((reactor, index) => <span key={reactor.userId} title={`${reactor.name ?? "Member"} reacted`} className="inline-flex items-center justify-center overflow-hidden w-5 h-5 rounded-full border-2 border-background bg-muted text-[8px] font-bold" style={{ marginLeft: index ? "-6px" : 0, zIndex: 5 - index }}>{reactor.avatar ? <img src={reactor.avatar} alt="" className="w-full h-full object-cover" /> : initials(reactor.name)}</span>)}
+      </div>}
+      <span className="text-xs font-semibold text-muted-foreground tabular-nums">{total.toLocaleString()}</span>
+    </div>}
+    <div className="relative w-fit" ref={pickerRef}>
+      <button type="button" disabled={!user || setReaction.isPending} onClick={() => choose((mine ?? "like") as GroupReaction)} onMouseEnter={() => { if (user) setHoverTimer(setTimeout(() => setPickerOpen(true), 350)); }} onMouseLeave={() => { if (hoverTimer) clearTimeout(hoverTimer); }} className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground hover:text-primary disabled:opacity-50" style={mine ? { color: current?.color } : undefined} aria-label={mine ? `Remove ${current?.label ?? "reaction"}` : "Like this Group post"}>
+        <span>{current?.emoji ?? "👍"}</span><span>{current?.label ?? "Like"}</span>
+      </button>
+      {pickerOpen && <div className="absolute bottom-full left-0 mb-2 z-30 flex gap-1 rounded-full border border-border bg-background px-3 py-2 shadow-xl" onMouseLeave={() => setPickerOpen(false)}>
+        {GROUP_REACTIONS.map((reaction) => <button type="button" key={reaction.type} disabled={!user || setReaction.isPending} onClick={() => choose(reaction.type)} className={`text-xl transition-transform hover:scale-125 ${mine === reaction.type ? "scale-125" : ""}`} title={reaction.label} aria-label={reaction.label}>{reaction.emoji}</button>)}
+      </div>}
+    </div>
+  </div>;
 }
 
 export default function GroupPostCard({
@@ -143,7 +211,7 @@ export default function GroupPostCard({
       </div>
 
       <div className="border-t border-border px-4 py-3 flex flex-col gap-3">
-        <ReactionBar targetId={post.id} targetType="public_group_post" />
+        <GroupReactionControl groupHandle={groupHandle} postId={post.id} />
         <button type="button" onClick={() => setShowComments((visible) => !visible)} className="inline-flex w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
           <MessageCircle className="w-4 h-4" /> {commentCount} comment{commentCount === 1 ? "" : "s"}
         </button>

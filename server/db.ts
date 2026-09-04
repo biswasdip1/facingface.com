@@ -367,6 +367,17 @@ export async function ensureLegacyRuntimeSchema(): Promise<void> {
     // New Page posts use a dedicated pageId. Older Page records retain their
     // original page:<id> marker, so both generations remain visible and stay
     // outside ordinary personal-feed queries.
+    if (await relationExists("emoji_reactions")) {
+      try {
+        // Existing databases may pre-date the two contextual reaction values.
+        // PostgreSQL ignores values already present, so this is safe on every start.
+        await db.execute(sql`ALTER TYPE "emoji_reactions_targetType_enum" ADD VALUE IF NOT EXISTS 'page_post'`);
+        await db.execute(sql`ALTER TYPE "emoji_reactions_targetType_enum" ADD VALUE IF NOT EXISTS 'public_group_post'`);
+      } catch (error) {
+        console.warn("[Reactions] Context reaction compatibility check skipped.", error instanceof Error ? error.message : error);
+      }
+    }
+
     if (await relationExists("public_groups")) {
       const groupColumns = await existingColumns("public_groups");
       if (!groupColumns.has("legacyHandle")) {
@@ -1122,8 +1133,44 @@ export async function updateViewerCount(streamId: number, delta: number): Promis
 // ─── Emoji Reactions ──────────────────────────────────────────────────────────
 
 import { emojiReactions, postShares, EmojiReaction, InsertEmojiReaction } from "../drizzle/schema";
+import { summarisePublicGroupReactions } from "./publicGroupReactionConsistency";
 
 export type EmojiReactionTarget = "post" | "comment" | "page_post" | "public_group_post";
+export type StandardReactionType = "like" | "love" | "haha" | "wow" | "sad" | "angry";
+export async function getPublicGroupPostReactionSummary(postId: number, userId?: number | null): Promise<{
+  counts: Record<string, number>;
+  total: number;
+  myReaction: StandardReactionType | null;
+  reactors: Array<{ userId: number; name: string | null; avatar: string | null; reaction: StandardReactionType }>;
+}> {
+  const db = await getDb();
+  if (!db) return { counts: {}, total: 0, myReaction: null, reactors: [] };
+  const rows = await db.select({ userId: emojiReactions.userId, reaction: emojiReactions.emoji, createdAt: emojiReactions.createdAt })
+    .from(emojiReactions)
+    .where(and(eq(emojiReactions.targetId, postId), eq(emojiReactions.targetType, "public_group_post")));
+  const summary = summarisePublicGroupReactions(
+    rows.map((row) => ({ userId: row.userId, reaction: row.reaction, createdAt: new Date(row.createdAt) })),
+    userId,
+  );
+  const reactors = await Promise.all(summary.recent.map(async (row) => {
+    const member = await getUserById(row.userId);
+    return { userId: row.userId, name: member?.name ?? null, avatar: member?.avatar ?? null, reaction: row.reaction as StandardReactionType };
+  }));
+  return { counts: summary.counts, total: summary.total, myReaction: summary.myReaction, reactors };
+}
+
+export async function setPublicGroupPostReaction(userId: number, postId: number, reaction: StandardReactionType | null): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(emojiReactions).where(and(
+    eq(emojiReactions.userId, userId),
+    eq(emojiReactions.targetId, postId),
+    eq(emojiReactions.targetType, "public_group_post"),
+  ));
+  if (reaction) {
+    await db.insert(emojiReactions).values({ userId, targetId: postId, targetType: "public_group_post", emoji: reaction });
+  }
+}
 
 export async function getEmojiReaction(
   userId: number,

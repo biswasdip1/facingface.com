@@ -211,6 +211,8 @@ import {
   getPublicGroupPostById,
   getPublicGroupPostComments,
   getPublicGroupPostCommentCounts,
+  getPublicGroupPostReactionSummary,
+  setPublicGroupPostReaction,
   createPublicGroupPostComment,
   deletePublicGroupPostComment,
   uploadPublicGroupCover,
@@ -2981,11 +2983,9 @@ const pagesRouter = router({
       // Page posts remain out of the personal Feed through the dedicated pageId
       // field, so they can safely retain the same URL preview metadata as a
       // standard post.
+      const detectedLinkUrl = input.text ? extractFirstUrl(input.text) : null;
       let linkPreview = null;
-      if (input.text) {
-        const foundUrl = extractFirstUrl(input.text);
-        if (foundUrl) linkPreview = await fetchLinkPreview(foundUrl);
-      }
+      if (detectedLinkUrl) linkPreview = await fetchLinkPreview(detectedLinkUrl);
 
       // Auto-generate video poster at 1s if mediaType=video and no custom poster was provided
       let resolvedPosterUrl: string | null = input.videoPosterUrl ?? null;
@@ -3018,7 +3018,7 @@ const pagesRouter = router({
         mediaType: input.mediaType ?? null,
         isFlagged: false,
         pageId: page.id,
-        linkUrl: linkPreview?.url ?? null,
+        linkUrl: linkPreview?.url ?? detectedLinkUrl ?? null,
         linkTitle: linkPreview?.title ?? null,
         linkDescription: linkPreview?.description ?? null,
         linkImage: linkPreview?.image ?? null,
@@ -3287,11 +3287,9 @@ const publicGroupsRouter = router({
 
       // Public Group posts remain in their own group timeline, while retaining
       // their own safe URL-preview metadata for display in that group only.
+      const detectedLinkUrl = input.content ? extractFirstUrl(input.content) : null;
       let linkPreview = null;
-      if (input.content) {
-        const foundUrl = extractFirstUrl(input.content);
-        if (foundUrl) linkPreview = await fetchLinkPreview(foundUrl);
-      }
+      if (detectedLinkUrl) linkPreview = await fetchLinkPreview(detectedLinkUrl);
 
       // Auto-generate video poster at 1s if mediaType=video and no custom poster was provided
       let resolvedPosterUrl: string | null = input.videoPosterUrl ?? null;
@@ -3355,7 +3353,7 @@ const publicGroupsRouter = router({
         docSize: input.docSize ?? null,
         docType: input.docType ?? null,
         bgColor: input.bgColor ?? null,
-        linkUrl: linkPreview?.url ?? null,
+        linkUrl: linkPreview?.url ?? detectedLinkUrl ?? null,
         linkTitle: linkPreview?.title ?? null,
         linkDescription: linkPreview?.description ?? null,
         linkImage: linkPreview?.image ?? null,
@@ -3399,6 +3397,33 @@ const publicGroupsRouter = router({
         if (a) authors[a.id] = { id: a.id, name: a.name, avatar: a.avatar ?? null, isVerified: a.isVerified ?? false };
       }
       return { posts, authors, commentCounts };
+    }),
+
+  getReactionSummary: publicProcedure
+    .input(z.object({ handle: z.string(), postId: z.number().int() }))
+    .query(async ({ input, ctx }) => {
+      const group = await getPublicGroupByHandle(input.handle);
+      if (!group) throw new TRPCError({ code: "NOT_FOUND" });
+      const post = await getPublicGroupPostById(input.postId);
+      if (!post || post.groupId !== group.id) throw new TRPCError({ code: "NOT_FOUND" });
+      return getPublicGroupPostReactionSummary(post.id, ctx.user?.id ?? null);
+    }),
+
+  setReaction: protectedProcedure
+    .input(z.object({
+      handle: z.string(),
+      postId: z.number().int(),
+      reaction: z.enum(["like", "love", "haha", "wow", "sad", "angry"]).nullable(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const group = await getPublicGroupByHandle(input.handle);
+      if (!group) throw new TRPCError({ code: "NOT_FOUND" });
+      const membership = await getPublicGroupMembership(group.id, ctx.user.id);
+      if (!membership) throw new TRPCError({ code: "FORBIDDEN", message: "Join the group to react." });
+      const post = await getPublicGroupPostById(input.postId);
+      if (!post || post.groupId !== group.id) throw new TRPCError({ code: "NOT_FOUND" });
+      await setPublicGroupPostReaction(ctx.user.id, post.id, input.reaction);
+      return getPublicGroupPostReactionSummary(post.id, ctx.user.id);
     }),
 
   getComments: publicProcedure
