@@ -55,8 +55,8 @@ vi.mock("./db", async (importOriginal) => {
     // Feed helpers — return posts from both Bob (2) and Carol (3)
     getFeedPosts: vi.fn().mockImplementation(async (_viewerId, _limit, _offset, excludeIds: number[] = []) => {
       const all = [
-        { id: 10, authorId: 2, text: "Post 10", isFlagged: false, isPinned: false, isScheduled: false, createdAt: new Date(), updatedAt: new Date(), mediaUrl: null, mediaType: null, photo2Url: null, photo3Url: null, photo1Caption: null, photo2Caption: null, photo3Caption: null, docUrl: null, docName: null, docSize: null, docType: null, audioUrl: null, audioName: null, audioDuration: null, bgColor: null, linkUrl: null, linkTitle: null, linkDescription: null, linkImage: null, linkSiteName: null, scheduledAt: null, deletedAt: null, resharedFromId: null, shareCount: 0, videoViews: 0 },
-        { id: 11, authorId: 3, text: "Post 11", isFlagged: false, isPinned: false, isScheduled: false, createdAt: new Date(), updatedAt: new Date(), mediaUrl: null, mediaType: null, photo2Url: null, photo3Url: null, photo1Caption: null, photo2Caption: null, photo3Caption: null, docUrl: null, docName: null, docSize: null, docType: null, audioUrl: null, audioName: null, audioDuration: null, bgColor: null, linkUrl: null, linkTitle: null, linkDescription: null, linkImage: null, linkSiteName: null, scheduledAt: null, deletedAt: null, resharedFromId: null, shareCount: 0, videoViews: 0 },
+        { id: 10, authorId: 2, text: "Post 10", isFlagged: false, isPinned: false, isScheduled: false, createdAt: new Date("2026-09-04T09:00:00.000Z"), updatedAt: new Date("2026-09-04T09:00:00.000Z"), mediaUrl: null, mediaType: null, photo2Url: null, photo3Url: null, photo1Caption: null, photo2Caption: null, photo3Caption: null, docUrl: null, docName: null, docSize: null, docType: null, audioUrl: null, audioName: null, audioDuration: null, bgColor: null, linkUrl: null, linkTitle: null, linkDescription: null, linkImage: null, linkSiteName: null, scheduledAt: null, deletedAt: null, resharedFromId: null, shareCount: 0, videoViews: 0 },
+        { id: 11, authorId: 3, text: "Post 11", isFlagged: false, isPinned: false, isScheduled: false, createdAt: new Date("2026-09-04T10:00:00.000Z"), updatedAt: new Date("2026-09-04T10:00:00.000Z"), mediaUrl: null, mediaType: null, photo2Url: null, photo3Url: null, photo1Caption: null, photo2Caption: null, photo3Caption: null, docUrl: null, docName: null, docSize: null, docType: null, audioUrl: null, audioName: null, audioDuration: null, bgColor: null, linkUrl: null, linkTitle: null, linkDescription: null, linkImage: null, linkSiteName: null, scheduledAt: null, deletedAt: null, resharedFromId: null, shareCount: 0, videoViews: 0 },
       ];
       return all.filter((p) => !excludeIds.includes(p.authorId));
     }),
@@ -99,6 +99,14 @@ describe("posts.feed block filtering", () => {
     const authorIds = result.posts.map((p) => p.authorId);
     expect(authorIds).toContain(BOB_ID);
     expect(authorIds).toContain(CAROL_ID);
+  });
+
+  it("shows the newest normal post first in the Home Feed", async () => {
+    const { getBlockedUserIds } = await import("./db");
+    vi.mocked(getBlockedUserIds).mockResolvedValueOnce([]);
+    const caller = appRouter.createCaller(makeCtx(ALICE_ID));
+    const result = await caller.posts.feed({ limit: 20, offset: 0 });
+    expect(result.posts.map((post) => post.id)).toEqual([11, 10]);
   });
 });
 

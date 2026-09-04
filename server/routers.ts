@@ -480,18 +480,14 @@ const postsRouter = router({
   feed: protectedProcedure
     .input(z.object({ limit: z.number().min(1).max(50).default(20), offset: z.number().default(0) }))
     .query(async ({ input, ctx }) => {
-      // Facebook-style feed behavior: posts do not expire after a fixed number of days.
-      // The feed still keeps fresh posts prominent, but it can also surface older posts
-      // when they are relevant through friendships, followed pages, and engagement.
+      // The main Home Feed is deliberately chronological: every new ordinary
+      // post appears at the top immediately, rather than being displaced by
+      // engagement or relationship ranking.
       const candidateLimit = Math.min(200, Math.max(input.limit * 4, input.limit));
-      const [followedPageIds, blockedIds, friendRows] = await Promise.all([
+      const [followedPageIds, blockedIds] = await Promise.all([
         getFollowedPageIds(ctx.user.id),
         getBlockedUserIds(ctx.user.id),
-        getFriends(ctx.user.id),
       ]);
-      const friendIds = new Set(
-        friendRows.map((friendship: any) => friendship.userId1 === ctx.user.id ? friendship.userId2 : friendship.userId1)
-      );
       const [regularPosts, pagePosts] = await Promise.all([
         getFeedPosts(ctx.user.id, candidateLimit, input.offset, blockedIds),
         followedPageIds.length > 0 ? getPageFeedPosts(followedPageIds, candidateLimit, 0) : Promise.resolve([]),
@@ -507,21 +503,12 @@ const postsRouter = router({
         getLikeCounts(candidatePostIds, "post"),
         getCommentCounts(candidatePostIds),
       ]);
-      const now = Date.now();
-      const scorePost = (post: typeof candidates[number]) => {
-        const ageHours = Math.max(0.1, (now - new Date(post.createdAt).getTime()) / 36e5);
-        const recencyScore = 120 / (1 + ageHours / 24);
-        const engagementScore = (candidateLikeCounts[post.id] ?? 0) * 3 + (candidateCommentCounts[post.id] ?? 0) * 5 + (post.videoViews ?? 0) / 100;
-        const relationshipScore = friendIds.has(post.authorId) ? 35 : post.authorId === ctx.user.id ? 20 : 0;
-        const pageScore = post.linkSiteName?.startsWith("page:") ? 12 : 0;
-        const mediaScore = post.mediaUrl || post.audioUrl || post.docUrl ? 4 : 0;
-        return recencyScore + engagementScore + relationshipScore + pageScore + mediaScore;
-      };
       const feedPosts = candidates
-        .map((post) => ({ post, score: scorePost(post) }))
-        .sort((a, b) => b.score - a.score || new Date(b.post.createdAt).getTime() - new Date(a.post.createdAt).getTime())
-        .slice(0, input.limit)
-        .map(({ post }) => post);
+        .sort((a, b) => {
+          const timeDifference = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          return timeDifference || b.id - a.id;
+        })
+        .slice(0, input.limit);
 
       const authorIds = Array.from(new Set(feedPosts.map((p) => p.authorId)));
       const authorList = await Promise.all(authorIds.map((id) => getUserById(id)));
