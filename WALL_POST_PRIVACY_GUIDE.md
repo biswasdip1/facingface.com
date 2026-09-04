@@ -13,7 +13,7 @@ This cumulative release adds a **Public** and **Private** audience choice to ord
 
 ## What Changed
 
-The normal post composer now includes two clear choices: **“Public — anyone can see”** and **“Private — friends only.”** The selector appears only for ordinary personal wall posts. Page and Group composers deliberately retain their own established privacy models and are not sent this new field.
+The normal post composer now includes two clear choices: **Public** and **Private**. **Public is selected automatically every time an ordinary composer opens**, so a person must actively choose Private for a friends-only post. The selector appears only for ordinary personal wall posts. Page and Group composers deliberately retain their own established privacy models and are not sent this new field.
 
 Privacy is enforced on the server, not merely hidden in the browser. Private normal wall posts are excluded from the Feed, profile timeline, search, hashtag pages, photo/video/document profile galleries, bookmarked views after friend removal, and Trending unless the requesting user is the author or an accepted friend. Direct post detail, comments, comment reactions, post reactions, likes, polls, saves, share counts, and video view registration also check access first. Private posts cannot be reshared, so their content cannot become public through a repost.
 

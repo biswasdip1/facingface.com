@@ -1267,7 +1267,7 @@ export default function PostCard({ post, author, likeCount, commentCount = 0, is
               <p className="flex items-center gap-1 text-xs text-muted-foreground">
                 <span>{timeAgo}</span>
                 {!post.pageId && !post.linkSiteName?.startsWith("page:") && (post.audience === "private" ? (
-                  <span className="inline-flex items-center gap-0.5" title="Private — accepted friends only"><span>·</span><Lock size={11} /><span>Friends</span></span>
+                  <span className="inline-flex items-center gap-0.5" title="Private — accepted friends only"><span>·</span><Lock size={11} /><span>Private</span></span>
                 ) : (
                   <span className="inline-flex items-center gap-0.5" title="Public — anyone can see"><span>·</span><Globe2 size={11} /><span>Public</span></span>
                 ))}

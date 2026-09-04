@@ -403,6 +403,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
     if (!open && (text.trim() || photoFiles.length > 0 || !!videoFile || !!audioFile || !!docFile)) {
       setShowDiscardDialog(true);
     } else {
+      if (open && !isContextPost) setAudience("public");
       setModalOpen(open);
     }
   };
@@ -830,6 +831,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
   const openModal = (afterOpen?: () => void) => {
     const hadDraft = hasSavedDraft;
     setHasSavedDraft(false);
+    if (!isContextPost) setAudience("public");
     setModalOpen(true);
     if (hadDraft) {
       const hasPhotos = photoPreviews.length > 0;
@@ -968,7 +970,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
                   onClick={() => setAudience("public")}
                   className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${audience === "public" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                 >
-                  <Globe2 size={14} /> Public — anyone can see
+                  <Globe2 size={14} /> Public
                 </button>
                 <button
                   type="button"
@@ -977,7 +979,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
                   onClick={() => setAudience("private")}
                   className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${audience === "private" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                 >
-                  <Lock size={14} /> Private — friends only
+                  <Lock size={14} /> Private
                 </button>
               </div>
             )}
