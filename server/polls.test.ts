@@ -32,6 +32,13 @@ vi.mock("./db", async (importOriginal) => {
       expiresAt: null,
       createdAt: new Date(),
     }),
+    getPostForViewer: vi.fn().mockImplementation(async (postId: number) => ({
+      id: postId,
+      authorId: 1,
+      audience: "public",
+      pageId: null,
+      linkSiteName: null,
+    })),
     // Stubs for other procedures called during post creation
     moderateContent: vi.fn().mockResolvedValue({ flagged: false }),
     getFeedPosts: vi.fn().mockResolvedValue([]),

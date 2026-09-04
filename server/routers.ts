@@ -31,6 +31,7 @@ import {
   getCommentCounts,
   getNotifications,
   getPostById,
+  getPostForViewer,
   getPostCount,
   getPostsByUser,
   getUnreadNotificationCount,
@@ -409,6 +410,24 @@ const nullablePostTextSchema = z.string().nullable().refine((value) => countWord
   message: `Post text must be ${POST_WORD_LIMIT} words or fewer.`,
 });
 
+/**
+ * All normal wall-post reads and interactions pass through this guard. It keeps
+ * Page records compatible while hiding friends-only wall posts from everyone
+ * except their author and accepted friends.
+ */
+async function requireViewablePost(postId: number, viewerId?: number | null) {
+  const post = await getPostForViewer(postId, viewerId);
+  if (!post) throw new TRPCError({ code: "NOT_FOUND", message: "Post not found." });
+  return post;
+}
+
+async function requireViewableCommentPost(commentId: number, viewerId?: number | null) {
+  const comment = await getCommentById(commentId);
+  if (!comment) throw new TRPCError({ code: "NOT_FOUND", message: "Comment not found." });
+  await requireViewablePost(comment.postId, viewerId);
+  return comment;
+}
+
 async function rejectSexualMediaUpload(userId: number, reason?: string): Promise<never> {
   const violationCount = await incrementUserViolation(userId);
   let suspendHours = 24;
@@ -474,7 +493,7 @@ const postsRouter = router({
         friendRows.map((friendship: any) => friendship.userId1 === ctx.user.id ? friendship.userId2 : friendship.userId1)
       );
       const [regularPosts, pagePosts] = await Promise.all([
-        getFeedPosts(candidateLimit, input.offset, blockedIds),
+        getFeedPosts(ctx.user.id, candidateLimit, input.offset, blockedIds),
         followedPageIds.length > 0 ? getPageFeedPosts(followedPageIds, candidateLimit, 0) : Promise.resolve([]),
       ]);
       const seen = new Set<number>();
@@ -517,7 +536,7 @@ const postsRouter = router({
 
       // Fetch original posts for reshares
       const resharedIds = Array.from(new Set(feedPosts.map((p) => p.resharedFromId).filter(Boolean) as number[]));
-      const resharedPostList = await Promise.all(resharedIds.map((id) => getPostById(id)));
+      const resharedPostList = await Promise.all(resharedIds.map((id) => getPostForViewer(id, ctx.user.id)));
       const resharedPosts: Record<number, typeof resharedPostList[0]> = {};
       for (const rp of resharedPostList) { if (rp) resharedPosts[rp.id] = rp; }
 
@@ -541,15 +560,15 @@ const postsRouter = router({
     .input(z.object({ userId: z.number(), limit: z.number().default(20), offset: z.number().default(0) }))
     .query(async ({ input, ctx }) => {
       const blockedIds = await getBlockedUserIds(ctx.user.id);
-      return getPostsByUser(input.userId, input.limit, input.offset, blockedIds);
+      return getPostsByUser(input.userId, ctx.user.id, input.limit, input.offset, blockedIds);
     }),
   getById: publicProcedure
     .input(z.object({ postId: z.number() }))
-    .query(async ({ input }) => {
-      const post = await getPostById(input.postId);
+    .query(async ({ input, ctx }) => {
+      const post = await getPostForViewer(input.postId, ctx.user?.id);
       if (!post) return null;
       const author = await getUserById(post.authorId);
-      const resharedPost = post.resharedFromId ? await getPostById(post.resharedFromId) : null;
+      const resharedPost = post.resharedFromId ? await getPostForViewer(post.resharedFromId, ctx.user?.id) : null;
       const resharedAuthor = resharedPost ? await getUserById(resharedPost.authorId) : null;
       const [likeCounts] = await Promise.all([getLikeCounts([post.id], "post")]);
       return {
@@ -595,6 +614,7 @@ const postsRouter = router({
         photo2Alt: z.string().max(500).optional(),
         photo3Alt: z.string().max(500).optional(),
         videoPosterUrl: z.string().optional(),
+        audience: z.enum(["public", "private"]).default("public"),
         scheduledAt: z.date().optional(),  // if set, post is saved as scheduled
       })
     )
@@ -738,6 +758,7 @@ const postsRouter = router({
         photo2Alt: input.photo2Alt ?? null,
         photo3Alt: input.photo3Alt ?? null,
         videoPosterUrl: resolvedPosterUrl,
+        audience: input.audience,
         scheduledAt: input.scheduledAt ?? null,
       });
 
@@ -788,11 +809,19 @@ const postsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       // Verify original post exists
-      const original = await getPostById(input.originalPostId);
-      if (!original) throw new TRPCError({ code: "NOT_FOUND", message: "Original post not found." });
+      const original = await requireViewablePost(input.originalPostId, ctx.user.id);
+      // A friends-only message must never become visible through a public share.
+      // Resharing it is therefore disabled even for an authorized friend.
+      if (original.audience === "private") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Private posts cannot be reshared." });
+      }
 
       // Prevent resharing a reshare (always point to the root original)
       const rootId = original.resharedFromId ?? original.id;
+      const rootPost = rootId === original.id ? original : await requireViewablePost(rootId, ctx.user.id);
+      if (rootPost.audience === "private") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Private posts cannot be reshared." });
+      }
 
       // Optional comment moderation
       if (input.comment) {
@@ -813,6 +842,7 @@ const postsRouter = router({
         isFlagged: false,
         mediaUrl: null,
         mediaType: null,
+        audience: "public",
       });
 
       // Record in post_shares table too
@@ -848,8 +878,8 @@ const postsRouter = router({
     }),
   search: protectedProcedure
     .input(z.object({ query: z.string().min(1).max(100) }))
-    .query(async ({ input }) => {
-      const foundPosts = await searchPosts(input.query);
+    .query(async ({ input, ctx }) => {
+      const foundPosts = await searchPosts(input.query, ctx.user.id);
       if (foundPosts.length === 0) return { posts: [], authors: {}, likeCounts: {} };
       const authorIds = Array.from(new Set(foundPosts.map((p) => p.authorId)));
       const authorList = await Promise.all(authorIds.map((id) => getUserById(id)));
@@ -885,8 +915,8 @@ const postsRouter = router({
     }),
   byHashtag: protectedProcedure
     .input(z.object({ tag: z.string().min(1).max(100) }))
-    .query(async ({ input }) => {
-      const foundPosts = await getPostsByHashtag(input.tag);
+    .query(async ({ input, ctx }) => {
+      const foundPosts = await getPostsByHashtag(input.tag, ctx.user.id);
       if (foundPosts.length === 0) return { posts: [], authors: {}, likeCounts: {} };
       const authorIds = Array.from(new Set(foundPosts.map((p) => p.authorId)));
       const authorList = await Promise.all(authorIds.map((id) => getUserById(id)));
@@ -922,6 +952,7 @@ const postsRouter = router({
     .input(z.object({ postId: z.number().int() }))
     .query(async ({ ctx, input }) => {
       const requesterId = ctx.user?.id;
+      await requireViewablePost(input.postId, requesterId);
       return getPostEditHistory(input.postId, requesterId);
     }),
   report: protectedProcedure
@@ -931,9 +962,9 @@ const postsRouter = router({
       description: z.string().max(500).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      const post = await requireViewablePost(input.postId, ctx.user.id);
       await createContentReport({ reporterId: ctx.user.id, targetType: "post", targetId: input.postId, reason: input.reason });
       try {
-        const post = await getPostById(input.postId);
         const reporter = await getUserById(ctx.user.id);
         const reportedUser = post ? await getUserById(post.authorId) : null;
         await sendReportEmail({
@@ -959,6 +990,7 @@ const commentsRouter = router({
   list: protectedProcedure
     .input(z.object({ postId: z.number() }))
     .query(async ({ ctx, input }) => {
+      await requireViewablePost(input.postId, ctx.user.id);
       const commentList = await getCommentsByPost(input.postId);
       if (commentList.length === 0) return { comments: [], authors: {}, likeCounts: {}, likedIds: [] };
 
@@ -979,6 +1011,7 @@ const commentsRouter = router({
   create: protectedProcedure
     .input(z.object({ postId: z.number(), text: z.string().min(1).max(1000), parentId: z.number().int().optional() }))
     .mutation(async ({ ctx, input }) => {
+      const post = await requireViewablePost(input.postId, ctx.user.id);
       // Content moderation
       const modResult = await moderateContent(input.text);
       if (modResult.flagged) {
@@ -997,8 +1030,7 @@ const commentsRouter = router({
       });
 
       // Notify post author
-      const post = await getPostById(input.postId);
-      if (post && post.authorId !== ctx.user.id) {
+      if (post.authorId !== ctx.user.id) {
         await createNotification({
           userId: post.authorId,
           actorId: ctx.user.id,
@@ -1034,9 +1066,9 @@ const commentsRouter = router({
       description: z.string().max(500).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      const comment = await requireViewableCommentPost(input.commentId, ctx.user.id);
       await createContentReport({ reporterId: ctx.user.id, targetType: "comment", targetId: input.commentId, reason: input.reason });
       try {
-        const comment = await getCommentById(input.commentId);
         const reporter = await getUserById(ctx.user.id);
         const reportedUser = comment ? await getUserById(comment.authorId) : null;
         await sendReportEmail({
@@ -1061,13 +1093,15 @@ const commentsRouter = router({
       reaction: z.enum(["like", "love", "haha", "wow", "sad", "angry"]),
     }))
     .mutation(async ({ ctx, input }) => {
+      await requireViewableCommentPost(input.commentId, ctx.user.id);
       await toggleCommentReaction(input.commentId, ctx.user.id, input.reaction);
       return { success: true };
     }),
 
   getReactionCounts: publicProcedure
     .input(z.object({ commentId: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await requireViewableCommentPost(input.commentId, ctx.user?.id);
       return await getCommentReactionCounts(input.commentId);
     }),
 
@@ -1076,7 +1110,8 @@ const commentsRouter = router({
       commentId: z.number(),
       reaction: z.enum(["like", "love", "haha", "wow", "sad", "angry"]),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await requireViewableCommentPost(input.commentId, ctx.user?.id);
       const users = await getCommentReactionUsers(input.commentId, input.reaction);
       return users.map((u) => ({
         id: u.id,
@@ -1096,6 +1131,11 @@ const likesRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      if (input.targetType === "post") {
+        await requireViewablePost(input.targetId, ctx.user.id);
+      } else {
+        await requireViewableCommentPost(input.targetId, ctx.user.id);
+      }
       const existing = await getLike(ctx.user.id, input.targetId, input.targetType);
 
       if (existing) {
@@ -1114,8 +1154,8 @@ const likesRouter = router({
         let commentId: number | null = null;
 
         if (input.targetType === "post") {
-          const post = await getPostById(input.targetId);
-          if (post) { ownerId = post.authorId; postId = post.id; }
+          const post = await requireViewablePost(input.targetId, ctx.user.id);
+          ownerId = post.authorId; postId = post.id;
         } else {
           const comment = await getCommentById(input.targetId);
           if (comment) { ownerId = comment.authorId; postId = comment.postId; commentId = comment.id; }
@@ -1143,7 +1183,10 @@ const likesRouter = router({
   getStatus: protectedProcedure
     .input(z.object({ targetIds: z.array(z.number()), targetType: z.enum(["post", "comment"]) }))
     .query(async ({ ctx, input }) => {
-      const likedIds = await getUserLikedIds(ctx.user.id, input.targetIds, input.targetType);
+      const allowedIds = input.targetType === "post"
+        ? (await Promise.all(input.targetIds.map(async (id) => (await getPostForViewer(id, ctx.user.id)) ? id : null))).filter((id): id is number => id != null)
+        : (await Promise.all(input.targetIds.map(async (id) => (await requireViewableCommentPost(id, ctx.user.id)) ? id : null))).filter((id): id is number => id != null);
+      const likedIds = await getUserLikedIds(ctx.user.id, allowedIds, input.targetType);
       return { likedIds };
     }),
 });
@@ -1215,14 +1258,14 @@ const followsRouter = router({
 const usersRouter = router({
   getProfile: protectedProcedure
     .input(z.object({ userId: z.number() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const user = await getUserById(input.userId);
       if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "User not found." });
 
       const [followerCount, followingCount, postCount] = await Promise.all([
         getFollowerCount(input.userId),
         getFollowingCount(input.userId),
-        getPostCount(input.userId),
+        getPostCount(input.userId, ctx.user.id),
       ]);
 
       return { user, followerCount, followingCount, postCount };
@@ -1519,6 +1562,7 @@ const pollsRouter = router({
   getForPost: protectedProcedure
     .input(z.object({ postId: z.number() }))
     .query(async ({ ctx, input }) => {
+      await requireViewablePost(input.postId, ctx.user.id);
       const poll = await getPollByPostId(input.postId);
       if (!poll) return { poll: null };
       const options = await getPollOptions(poll.id);
@@ -1548,6 +1592,7 @@ const pollsRouter = router({
       if (!poll) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Poll not found." });
       }
+      await requireViewablePost(poll.postId, ctx.user.id);
       // Reject votes on expired polls
       if (poll.expiresAt && new Date() > poll.expiresAt) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "This poll has expired and is no longer accepting votes." });
@@ -1581,6 +1626,8 @@ const reactionsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      if (input.targetType === "post") await requireViewablePost(input.targetId, ctx.user.id);
+      if (input.targetType === "comment") await requireViewableCommentPost(input.targetId, ctx.user.id);
       const existing = await getEmojiReaction(ctx.user.id, input.targetId, input.targetType, input.emoji);
       if (existing) {
         await removeEmojiReaction(ctx.user.id, input.targetId, input.targetType, input.emoji);
@@ -1599,6 +1646,8 @@ const reactionsRouter = router({
   getCounts: protectedProcedure
     .input(z.object({ targetId: z.number().int(), targetType: z.enum(["post", "comment", "page_post", "public_group_post"]) }))
     .query(async ({ ctx, input }) => {
+      if (input.targetType === "post") await requireViewablePost(input.targetId, ctx.user.id);
+      if (input.targetType === "comment") await requireViewableCommentPost(input.targetId, ctx.user.id);
       const counts = await getEmojiReactionCounts(input.targetId, input.targetType);
       const myReactions = await getUserEmojiReactions(ctx.user.id, input.targetId, input.targetType);
       return { counts, myReactions };
@@ -1612,7 +1661,12 @@ const reactionsRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
-      const counts = await getEmojiReactionCountsBatch(input.targetIds, input.targetType);
+      const allowedIds = input.targetType === "post"
+        ? (await Promise.all(input.targetIds.map(async (id) => (await getPostForViewer(id, ctx.user.id)) ? id : null))).filter((id): id is number => id != null)
+        : input.targetType === "comment"
+          ? (await Promise.all(input.targetIds.map(async (id) => (await requireViewableCommentPost(id, ctx.user.id)) ? id : null))).filter((id): id is number => id != null)
+          : input.targetIds;
+      const counts = await getEmojiReactionCountsBatch(allowedIds, input.targetType);
       const myReactions = await getUserEmojiReactionsBatch(ctx.user.id, input.targetIds, input.targetType);
       return { counts, myReactions };
     }),
@@ -1623,12 +1677,14 @@ const bookmarksRouter = router({
   toggle: protectedProcedure
     .input(z.object({ postId: z.number().int() }))
     .mutation(async ({ ctx, input }) => {
+      await requireViewablePost(input.postId, ctx.user.id);
       return toggleBookmark(ctx.user.id, input.postId);
     }),
 
   isBookmarked: protectedProcedure
     .input(z.object({ postId: z.number().int() }))
     .query(async ({ ctx, input }) => {
+      await requireViewablePost(input.postId, ctx.user.id);
       const bookmarked = await isPostBookmarked(ctx.user.id, input.postId);
       return { bookmarked };
     }),
@@ -1636,7 +1692,9 @@ const bookmarksRouter = router({
   getBookmarkedIds: protectedProcedure
     .query(async ({ ctx }) => {
       const ids = await getBookmarkedPostIds(ctx.user.id);
-      return { ids };
+      const viewableIds = (await Promise.all(ids.map(async (id) => (await getPostForViewer(id, ctx.user.id)) ? id : null)))
+        .filter((id): id is number => id != null);
+      return { ids: viewableIds };
     }),
 
   getSaved: protectedProcedure
@@ -1646,7 +1704,9 @@ const bookmarksRouter = router({
         getBookmarkedPosts(ctx.user.id, input.limit, input.offset),
         getSavedPublicGroupPosts(ctx.user.id, input.limit, input.offset),
       ]);
-      const postsList = rows.map((r) => r.post);
+      const viewableRows = (await Promise.all(rows.map(async (row) => ({ row, post: await getPostForViewer(row.post.id, ctx.user.id) }))))
+        .filter((item): item is { row: typeof rows[number]; post: NonNullable<typeof item.post> } => item.post != null);
+      const postsList = viewableRows.map((item) => item.post);
       const authorIds = Array.from(new Set([...postsList, ...groupPosts].map((post) => post.authorId)));
       const authorRows = await Promise.all(authorIds.map((id) => getUserById(id)));
       const authors: Record<number, { id: number; name: string | null; avatar: string | null }> = {};
@@ -1661,8 +1721,10 @@ const bookmarksRouter = router({
 
   getCounts: protectedProcedure
     .input(z.object({ postIds: z.array(z.number().int()) }))
-    .query(async ({ input }) => {
-      return getBookmarkCounts(input.postIds);
+    .query(async ({ ctx, input }) => {
+      const viewableIds = (await Promise.all(input.postIds.map(async (id) => (await getPostForViewer(id, ctx.user.id)) ? id : null)))
+        .filter((id): id is number => id != null);
+      return getBookmarkCounts(viewableIds);
     }),
 });
 
@@ -1674,6 +1736,7 @@ const postReactionsRouter = router({
       reaction: z.enum(["like", "love", "haha", "wow", "sad", "angry", "seen"]).nullable(),
     }))
     .mutation(async ({ ctx, input }) => {
+      await requireViewablePost(input.postId, ctx.user.id);
       await setPostReaction(ctx.user.id, input.postId, input.reaction);
       return { success: true };
     }),
@@ -1681,6 +1744,7 @@ const postReactionsRouter = router({
   getCounts: protectedProcedure
     .input(z.object({ postId: z.number().int() }))
     .query(async ({ ctx, input }) => {
+      await requireViewablePost(input.postId, ctx.user.id);
       const { counts, reactors } = await getPostReactionSummary(input.postId);
       const myReaction = await getUserPostReaction(ctx.user.id, input.postId);
       return { counts, reactors: reactors.slice(0, 5), total: reactors.length, myReaction };
@@ -1690,7 +1754,9 @@ const postReactionsRouter = router({
     .input(z.object({ postIds: z.array(z.number().int()) }))
     .query(async ({ ctx, input }) => {
       if (input.postIds.length === 0) return { reactions: {} };
-      const reactions = await getUserPostReactions(ctx.user.id, input.postIds);
+      const viewableIds = (await Promise.all(input.postIds.map(async (id) => (await getPostForViewer(id, ctx.user.id)) ? id : null)))
+        .filter((id): id is number => id != null);
+      const reactions = await getUserPostReactions(ctx.user.id, viewableIds);
       return { reactions };
     }),
 });
@@ -1700,14 +1766,18 @@ const sharesRouter = router({
   record: protectedProcedure
     .input(z.object({ postId: z.number().int() }))
     .mutation(async ({ ctx, input }) => {
+      const post = await requireViewablePost(input.postId, ctx.user.id);
+      if (post.audience === "private") throw new TRPCError({ code: "FORBIDDEN", message: "Private posts cannot be shared." });
       await recordShare(input.postId, ctx.user.id);
       return { success: true };
     }),
 
   getCounts: protectedProcedure
     .input(z.object({ postIds: z.array(z.number().int()) }))
-    .query(async ({ input }) => {
-      return getShareCounts(input.postIds);
+    .query(async ({ ctx, input }) => {
+      const viewableIds = (await Promise.all(input.postIds.map(async (id) => (await getPostForViewer(id, ctx.user.id)) ? id : null)))
+        .filter((id): id is number => id != null);
+      return getShareCounts(viewableIds);
     }),
 });
 
@@ -2780,18 +2850,18 @@ const photosRouter = router({
   // Gallery — auto-populated from posts
   getGalleryPhotos: protectedProcedure
     .input(z.object({ userId: z.number() }))
-    .query(async ({ input }) => {
-      return getPostPhotos(input.userId);
+    .query(async ({ input, ctx }) => {
+      return getPostPhotos(input.userId, ctx.user.id);
     }),
   getGalleryVideos: protectedProcedure
     .input(z.object({ userId: z.number() }))
-    .query(async ({ input }) => {
-      return getPostVideos(input.userId);
+    .query(async ({ input, ctx }) => {
+      return getPostVideos(input.userId, ctx.user.id);
     }),
   getGalleryDocs: protectedProcedure
     .input(z.object({ userId: z.number() }))
-    .query(async ({ input }) => {
-      return getPostDocs(input.userId);
+    .query(async ({ input, ctx }) => {
+      return getPostDocs(input.userId, ctx.user.id);
     }),
 });
 
@@ -3773,8 +3843,8 @@ const storiesRouter = router({
 const trendingRouter = router({
   getPosts: publicProcedure
     .input(z.object({ limit: z.number().min(1).max(50).default(20) }))
-    .query(async ({ input }) => {
-      const postsList = await getTrendingPosts(input.limit);
+    .query(async ({ input, ctx }) => {
+      const postsList = await getTrendingPosts(input.limit, ctx.user?.id);
       if (postsList.length === 0) return { posts: [], authors: {}, reactionCounts: {} };
       const authorIds = Array.from(new Set(postsList.map((p) => p.authorId)));
       const authorRows = await Promise.all(authorIds.map((id) => getUserById(id)));
@@ -3794,11 +3864,12 @@ const videoViewsRouter = router({
   increment: protectedProcedure
     .input(z.object({ postId: z.number().int() }))
     .mutation(async ({ ctx, input }) => {
+      await requireViewablePost(input.postId, ctx.user.id);
       const newCount = await incrementVideoViews(input.postId);
       // Notify post author if milestone reached (100, 500, 1000, 5000, ...)
       const milestones = [10, 50, 100, 500, 1000, 5000, 10000];
       if (milestones.includes(newCount)) {
-        const post = await getPostById(input.postId);
+        const post = await getPostForViewer(input.postId, ctx.user.id);
         if (post && post.authorId !== ctx.user.id) {
           await createNotification({
             userId: post.authorId,

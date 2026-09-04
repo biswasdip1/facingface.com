@@ -44,7 +44,7 @@ function ComposerAvatar({ src, name, size = 10 }: { src?: string | null; name?: 
 }
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Image, Video, X, Loader2, Link2, BarChart2, Plus, Trash2, Smile, Radio, FileText, Music, Film } from "lucide-react";
+import { Image, Video, X, Loader2, Link2, BarChart2, Plus, Trash2, Smile, Radio, FileText, Music, Film, Globe2, Lock } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { toast } from "sonner";
 import Picker from "@emoji-mart/react";
@@ -273,6 +273,9 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
   // Page and Public Group posts remain isolated in their own timelines, but use
   // the same safe URL preview service as standard Feed posts.
   const isContextPost = Boolean(pageHandle || groupHandle);
+  // Only ordinary wall posts offer an audience choice. Context posts retain
+  // their established Page or Group visibility rules.
+  const [audience, setAudience] = useState<"public" | "private">("public");
   const { data: previewData, isFetching: previewLoading } = trpc.linkPreview.fetch.useQuery(
     { url: previewUrl! },
     { enabled: !!previewUrl && !previewDismissed && !showPoll }
@@ -391,6 +394,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
     setAudioFile(null);
     setDocFile(null);
     setScheduledAt(undefined);
+    setAudience("public");
     setModalOpen(false);
   };
 
@@ -793,7 +797,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
     } else if (pageHandle) {
       createPagePost.mutate({ handle: pageHandle, ...fullPayload });
     } else {
-      createPost.mutate(fullPayload);
+      createPost.mutate({ ...fullPayload, audience });
     }
   };
 
@@ -944,9 +948,39 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
               <ComposerAvatar src={pageHandle ? pageAvatar : user?.avatar} name={pageHandle ? (pageName ?? pageHandle) : user?.name} />
               <div>
                 <p className="text-sm font-bold text-foreground leading-none">{pageHandle ? (pageName ?? pageHandle) : (user?.name ?? "You")}</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">{pageHandle ? `Posting to ${pageName ?? pageHandle}` : "Posting to everyone"}</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {pageHandle
+                    ? `Posting to ${pageName ?? pageHandle}`
+                    : groupHandle
+                      ? `Posting to ${groupName ?? groupHandle}`
+                      : audience === "private"
+                        ? "Posting to accepted friends only"
+                        : "Posting to everyone"}
+                </p>
               </div>
             </div>
+            {!isContextPost && (
+              <div className="flex items-center rounded-lg border border-border bg-muted/40 p-0.5" role="radiogroup" aria-label="Post audience">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={audience === "public"}
+                  onClick={() => setAudience("public")}
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${audience === "public" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  <Globe2 size={14} /> Public — anyone can see
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={audience === "private"}
+                  onClick={() => setAudience("private")}
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${audience === "private" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  <Lock size={14} /> Private — friends only
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Modal body */}

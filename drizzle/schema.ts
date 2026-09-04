@@ -92,6 +92,8 @@ export const posts = pgTable("posts", {
   // A dedicated Page marker keeps Page content out of the personal Feed without
   // sacrificing link preview metadata such as a publisher name.
   pageId: integer("pageId"),
+  // Standard wall-post audience. Existing rows and new posts default to public.
+  audience: varchar("audience", { length: 10 }).default("public").notNull(),
   docUrl: text("docUrl"),
   docName: varchar("docName", { length: 255 }),
   docSize: integer("docSize"),

@@ -31,12 +31,14 @@ vi.mock("./db", () => ({
   // original mocks below:
   getFeedPosts: vi.fn().mockResolvedValue([]),
   getPostsByUser: vi.fn().mockResolvedValue([]),
+  getFriends: vi.fn().mockResolvedValue([]),
   getUserById: vi.fn().mockResolvedValue({ id: 1, name: "Alice", avatar: null }),
   getLikeCounts: vi.fn().mockResolvedValue({}),
   getUserLikedIds: vi.fn().mockResolvedValue([]),
   createPost: vi.fn().mockResolvedValue(42),
   deletePost: vi.fn().mockResolvedValue(undefined),
-  getPostById: vi.fn().mockResolvedValue({ id: 1, authorId: 2, text: "Hello", postId: 1 }),
+  getPostById: vi.fn().mockResolvedValue({ id: 1, authorId: 2, text: "Hello", postId: 1, audience: "public" }),
+  getPostForViewer: vi.fn().mockResolvedValue({ id: 1, authorId: 2, text: "Hello", postId: 1, audience: "public" }),
   getCommentsByPost: vi.fn().mockResolvedValue([]),
   createComment: vi.fn().mockResolvedValue(10),
   deleteComment: vi.fn().mockResolvedValue(undefined),
@@ -76,6 +78,7 @@ vi.mock("./imageUtils", () => ({
 
 vi.mock("./moderation", () => ({
   moderateContent: vi.fn().mockResolvedValue({ flagged: false }),
+  moderateImageBuffer: vi.fn().mockResolvedValue({ flagged: false }),
 }));
 
 vi.mock("./storage", () => ({
@@ -555,15 +558,15 @@ describe("shares.getCounts", () => {
 
 describe("posts.reshare", () => {
   it("reshares an existing post", async () => {
-    const { createPost, getPostById } = await import("./db");
-    vi.mocked(getPostById).mockResolvedValueOnce({
+    const { createPost, getPostForViewer } = await import("./db");
+    vi.mocked(getPostForViewer).mockResolvedValueOnce({
       id: 1, authorId: 2, text: "Original post", resharedFromId: null,
       mediaUrl: null, mediaType: null, photo2Url: null, photo3Url: null,
       photo1Caption: null, photo2Caption: null, photo3Caption: null,
       linkUrl: null, linkTitle: null, linkDescription: null, linkImage: null, linkSiteName: null,
       docUrl: null, docName: null, docSize: null, docType: null,
       bgColor: null, audioUrl: null, audioName: null, audioDuration: null,
-      reshareComment: null, isFlagged: false, pollId: null,
+      reshareComment: null, isFlagged: false, pollId: null, audience: "public",
       createdAt: new Date(), updatedAt: new Date(),
     });
     vi.mocked(createPost).mockResolvedValueOnce(55);
@@ -576,25 +579,28 @@ describe("posts.reshare", () => {
   });
 
   it("throws NOT_FOUND when original post does not exist", async () => {
-    const { getPostById } = await import("./db");
-    vi.mocked(getPostById).mockResolvedValueOnce(undefined);
+    const { getPostForViewer } = await import("./db");
+    vi.mocked(getPostForViewer).mockResolvedValueOnce(undefined);
     const caller = appRouter.createCaller(makeCtx(1));
     await expect(caller.posts.reshare({ originalPostId: 999 })).rejects.toThrow("not found");
   });
 
   it("uses root post id when resharing a reshare", async () => {
-    const { createPost, getPostById } = await import("./db");
+    const { createPost, getPostForViewer } = await import("./db");
     // Simulate resharing a post that is itself a reshare (resharedFromId = 5)
-    vi.mocked(getPostById).mockResolvedValueOnce({
+    vi.mocked(getPostForViewer).mockResolvedValueOnce({
       id: 10, authorId: 2, text: "Reshared post", resharedFromId: 5,
       mediaUrl: null, mediaType: null, photo2Url: null, photo3Url: null,
       photo1Caption: null, photo2Caption: null, photo3Caption: null,
       linkUrl: null, linkTitle: null, linkDescription: null, linkImage: null, linkSiteName: null,
       docUrl: null, docName: null, docSize: null, docType: null,
       bgColor: null, audioUrl: null, audioName: null, audioDuration: null,
-      reshareComment: null, isFlagged: false, pollId: null,
+      reshareComment: null, isFlagged: false, pollId: null, audience: "public",
       createdAt: new Date(), updatedAt: new Date(),
-    });
+    }).mockResolvedValueOnce({
+      id: 5, authorId: 2, text: "Root post", resharedFromId: null, audience: "public",
+      mediaUrl: null, mediaType: null, linkSiteName: null,
+    } as any);
     vi.mocked(createPost).mockResolvedValueOnce(60);
     const caller = appRouter.createCaller(makeCtx(1));
     const result = await caller.posts.reshare({ originalPostId: 10 });

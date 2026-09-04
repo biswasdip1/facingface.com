@@ -465,9 +465,21 @@ export async function ensureLegacyRuntimeSchema(): Promise<void> {
       if (!postColumns.has("pageId")) {
         await db.execute(sql`ALTER TABLE "posts" ADD COLUMN "pageId" integer`);
       }
+      // Normal wall posts used to have no audience field. Give every existing
+      // post a durable public value before applying the friends-only rule.
+      if (!postColumns.has("audience")) {
+        await db.execute(sql`ALTER TABLE "posts" ADD COLUMN "audience" varchar(10) NOT NULL DEFAULT 'public'`);
+      } else {
+        await db.execute(sql`UPDATE "posts" SET "audience" = 'public' WHERE "audience" IS NULL`);
+        await db.execute(sql`ALTER TABLE "posts" ALTER COLUMN "audience" SET DEFAULT 'public'`);
+        await db.execute(sql`ALTER TABLE "posts" ALTER COLUMN "audience" SET NOT NULL`);
+      }
       const postIndexes = await existingIndexNames("posts");
       if (!postIndexes.has("posts_pageId_idx")) {
         await db.execute(sql`CREATE INDEX "posts_pageId_idx" ON "posts" ("pageId")`);
+      }
+      if (!postIndexes.has("posts_author_audience_createdAt_idx")) {
+        await db.execute(sql`CREATE INDEX "posts_author_audience_createdAt_idx" ON "posts" ("authorId", "audience", "createdAt" DESC)`);
       }
     }
 
@@ -722,7 +734,7 @@ export async function searchUsers(query: string, limit = 10): Promise<User[]> {
   return result;
 }
 
-export async function searchPosts(query: string, limit = 20): Promise<Post[]> {
+export async function searchPosts(query: string, viewerId: number, limit = 20): Promise<Post[]> {
   const db = await getDb();
   if (!db) return [];
   const result = await db
@@ -730,13 +742,45 @@ export async function searchPosts(query: string, limit = 20): Promise<Post[]> {
     .from(posts)
     .where(and(
       sql`LOWER(${posts.text}) LIKE ${`%${query.toLowerCase()}%`}`,
-      eq(posts.isFlagged, false)
+      eq(posts.isFlagged, false),
+      normalWallPostCondition(),
+      wallPostAudienceCondition(viewerId),
     ))
     .orderBy(desc(posts.createdAt))
     .limit(limit);
   return result;
 }
 // ─── Posts ────────────────────────────────────────────────────────────────────
+
+/**
+ * Page records share the posts table for legacy reasons. These conditions keep
+ * normal wall-post privacy separate from Page and Group privacy systems.
+ */
+function normalWallPostCondition() {
+  return and(
+    isNull(posts.pageId),
+    sql`(${posts.linkSiteName} IS NULL OR ${posts.linkSiteName} NOT LIKE 'page:%')`,
+  );
+}
+
+/**
+ * Legacy rows with a missing audience remain public. A private wall post is
+ * returned only to its author or a confirmed friendship record, never a
+ * pending friend request.
+ */
+function wallPostAudienceCondition(viewerId?: number | null) {
+  const publicAudience = sql`COALESCE(${posts.audience}, 'public') <> 'private'`;
+  if (viewerId == null) return publicAudience;
+  return or(
+    publicAudience,
+    eq(posts.authorId, viewerId),
+    sql`EXISTS (
+      SELECT 1 FROM "friendships" AS friendship
+      WHERE (friendship."userId1" = ${viewerId} AND friendship."userId2" = ${posts.authorId})
+         OR (friendship."userId2" = ${viewerId} AND friendship."userId1" = ${posts.authorId})
+    )`,
+  );
+}
 
 export async function createPost(data: InsertPost): Promise<number> {
   const db = await getDb();
@@ -750,6 +794,33 @@ export async function getPostById(id: number): Promise<Post | undefined> {
   if (!db) return undefined;
   const result = await db.select().from(posts).where(eq(posts.id, id)).limit(1);
   return result[0];
+}
+
+/** Secure direct lookup for the normal wall-post feature. */
+export async function getViewableWallPostById(id: number, viewerId?: number | null): Promise<Post | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(posts).where(and(
+    eq(posts.id, id),
+    normalWallPostCondition(),
+    wallPostAudienceCondition(viewerId),
+  )).limit(1);
+  return result[0];
+}
+
+/**
+ * Interaction routes also serve historic Page records in this table. Preserve
+ * their established Page behaviour, but never allow a private normal wall post
+ * to be read or changed by a non-friend.
+ */
+export async function getPostForViewer(id: number, viewerId?: number | null): Promise<Post | undefined> {
+  const post = await getPostById(id);
+  if (!post) return undefined;
+  const isNormalWallPost = post.pageId == null && !post.linkSiteName?.startsWith("page:");
+  if (!isNormalWallPost || post.audience !== "private") return post;
+  if (viewerId == null) return undefined;
+  if (post.authorId === viewerId) return post;
+  return (await areFriends(post.authorId, viewerId)) ? post : undefined;
 }
 
 export async function getBlockedUserIds(userId: number): Promise<number[]> {
@@ -766,15 +837,13 @@ export async function getBlockedUserIds(userId: number): Promise<number[]> {
   return rows.map((r) => r.id);
 }
 
-export async function getFeedPosts(limit = 20, offset = 0, excludeUserIds: number[] = []): Promise<Post[]> {
+export async function getFeedPosts(viewerId: number, limit = 20, offset = 0, excludeUserIds: number[] = []): Promise<Post[]> {
   const db = await getDb();
   if (!db) return [];
-  // Page posts remain regular posts so standard comments and reactions work,
-  // but pageId (or the older page:<id> marker) keeps them out of the personal Feed.
   const baseWhere = and(
     eq(posts.isFlagged, false),
-    isNull(posts.pageId),
-    sql`(${posts.linkSiteName} IS NULL OR ${posts.linkSiteName} NOT LIKE 'page:%')`,
+    normalWallPostCondition(),
+    wallPostAudienceCondition(viewerId),
   );
   const where = excludeUserIds.length > 0
     ? and(baseWhere, notInArray(posts.authorId, excludeUserIds))
@@ -788,7 +857,7 @@ export async function getFeedPosts(limit = 20, offset = 0, excludeUserIds: numbe
     .offset(offset);
 }
 
-export async function getPostsByUser(authorId: number, limit = 20, offset = 0, excludeViewerIds: number[] = []): Promise<Post[]> {
+export async function getPostsByUser(authorId: number, viewerId: number, limit = 20, offset = 0, excludeViewerIds: number[] = []): Promise<Post[]> {
   const db = await getDb();
   if (!db) return [];
   // If the author is in the viewer's block list (or vice versa), return empty
@@ -796,7 +865,12 @@ export async function getPostsByUser(authorId: number, limit = 20, offset = 0, e
   return db
     .select()
     .from(posts)
-    .where(and(eq(posts.authorId, authorId), eq(posts.isFlagged, false)))
+    .where(and(
+      eq(posts.authorId, authorId),
+      eq(posts.isFlagged, false),
+      normalWallPostCondition(),
+      wallPostAudienceCondition(viewerId),
+    ))
     .orderBy(desc(posts.isPinned), desc(posts.createdAt))
     .limit(limit)
     .offset(offset);
@@ -1075,13 +1149,18 @@ export async function markNotificationsRead(userId: number): Promise<void> {
     .where(and(eq(notifications.userId, userId), eq(notifications.isRead, false)));
 }
 
-export async function getPostCount(authorId: number): Promise<number> {
+export async function getPostCount(authorId: number, viewerId: number): Promise<number> {
   const db = await getDb();
   if (!db) return 0;
   const result = await db
     .select({ count: sql<number>`count(*)` })
     .from(posts)
-    .where(and(eq(posts.authorId, authorId), eq(posts.isFlagged, false)));
+    .where(and(
+      eq(posts.authorId, authorId),
+      eq(posts.isFlagged, false),
+      normalWallPostCondition(),
+      wallPostAudienceCondition(viewerId),
+    ));
   return Number(result[0]?.count ?? 0);
 }
 
@@ -2121,13 +2200,18 @@ export async function saveHashtags(postId: number, tags: string[]): Promise<void
   }
 }
 
-export async function getPostsByHashtag(tag: string, limit = 20): Promise<Post[]> {
+export async function getPostsByHashtag(tag: string, viewerId: number, limit = 20): Promise<Post[]> {
   const db = await getDb();
   if (!db) return [];
   const tagRows = await db.select().from(hashtags).where(eq(hashtags.tag, tag.toLowerCase())).limit(limit);
   if (tagRows.length === 0) return [];
   const postIds = tagRows.map((r) => r.postId);
-  return db.select().from(posts).where(and(inArray(posts.id, postIds), eq(posts.isFlagged, false))).orderBy(desc(posts.createdAt));
+  return db.select().from(posts).where(and(
+    inArray(posts.id, postIds),
+    eq(posts.isFlagged, false),
+    normalWallPostCondition(),
+    wallPostAudienceCondition(viewerId),
+  )).orderBy(desc(posts.createdAt));
 }
 
 export async function editPost(
@@ -2713,7 +2797,7 @@ export async function getActiveCoverPhoto(userId: number): Promise<CoverPhoto | 
 }
 
 // ─── Media Gallery (from posts) ───────────────────────────────────────────────
-export async function getPostPhotos(userId: number): Promise<{ id: number; postId: number; url: string; url2: string | null; url3: string | null; caption: string | null; createdAt: Date; commentCount: number; likeCount: number }[]> {
+export async function getPostPhotos(userId: number, viewerId: number): Promise<{ id: number; postId: number; url: string; url2: string | null; url3: string | null; caption: string | null; createdAt: Date; commentCount: number; likeCount: number }[]> {
   const db = await getDb();
   if (!db) return [];
 
@@ -2737,6 +2821,8 @@ export async function getPostPhotos(userId: number): Promise<{ id: number; postI
     .where(and(
       eq(posts.authorId, userId),
       eq(posts.mediaType, "image"),
+      normalWallPostCondition(),
+      wallPostAudienceCondition(viewerId),
       sql`(${posts.mediaUrl} IS NOT NULL OR ${posts.photo2Url} IS NOT NULL OR ${posts.photo3Url} IS NOT NULL)`
     ))
     .orderBy(desc(posts.createdAt))
@@ -2759,25 +2845,36 @@ export async function getPostPhotos(userId: number): Promise<{ id: number; postI
   });
 }
 
-export async function getPostVideos(userId: number): Promise<{ id: number; url: string; createdAt: Date; videoViews: number }[]> {
+export async function getPostVideos(userId: number, viewerId: number): Promise<{ id: number; url: string; createdAt: Date; videoViews: number }[]> {
   const db = await getDb();
   if (!db) return [];
   const rows = await db
     .select({ id: posts.id, url: posts.mediaUrl, createdAt: posts.createdAt, videoViews: posts.videoViews })
     .from(posts)
-    .where(and(eq(posts.authorId, userId), eq(posts.mediaType, "video"), isNotNull(posts.mediaUrl)))
+    .where(and(
+      eq(posts.authorId, userId),
+      eq(posts.mediaType, "video"),
+      isNotNull(posts.mediaUrl),
+      normalWallPostCondition(),
+      wallPostAudienceCondition(viewerId),
+    ))
     .orderBy(desc(posts.createdAt))
     .limit(200);
   return rows.map((r) => ({ ...r, url: r.url!, videoViews: r.videoViews ?? 0 }));
 }
 
-export async function getPostDocs(userId: number): Promise<{ id: number; url: string; name: string | null; size: number | null; docType: string | null; createdAt: Date }[]> {
+export async function getPostDocs(userId: number, viewerId: number): Promise<{ id: number; url: string; name: string | null; size: number | null; docType: string | null; createdAt: Date }[]> {
   const db = await getDb();
   if (!db) return [];
   const rows = await db
     .select({ id: posts.id, url: posts.docUrl, name: posts.docName, size: posts.docSize, docType: posts.docType, createdAt: posts.createdAt })
     .from(posts)
-    .where(and(eq(posts.authorId, userId), isNotNull(posts.docUrl)))
+    .where(and(
+      eq(posts.authorId, userId),
+      isNotNull(posts.docUrl),
+      normalWallPostCondition(),
+      wallPostAudienceCondition(viewerId),
+    ))
     .orderBy(desc(posts.createdAt))
     .limit(200);
   return rows.map((r) => ({ ...r, url: r.url! }));
@@ -3713,7 +3810,7 @@ export async function incrementVideoViews(postId: number): Promise<number> {
 }
 
 // ─── Trending Posts ───────────────────────────────────────────────────────────
-export async function getTrendingPosts(limit = 20): Promise<Post[]> {
+export async function getTrendingPosts(limit = 20, viewerId?: number | null): Promise<Post[]> {
   const db = await getDb();
   if (!db) return [];
   // Trending = posts with the most reactions in the last 7 days
@@ -3733,14 +3830,25 @@ export async function getTrendingPosts(limit = 20): Promise<Post[]> {
     const rows = await db
       .select()
       .from(posts)
-      .where(and(isNull(posts.resharedFromId), gte(posts.createdAt, fallbackSince)))
+      .where(and(
+      isNull(posts.resharedFromId),
+      gte(posts.createdAt, fallbackSince),
+      eq(posts.isFlagged, false),
+      normalWallPostCondition(),
+      wallPostAudienceCondition(viewerId),
+    ))
       .orderBy(desc(posts.createdAt))
       .limit(limit);
     return rows;
   }
 
   const postIds = reactionCounts.map((r) => r.postId);
-  const postRows = await db.select().from(posts).where(inArray(posts.id, postIds));
+  const postRows = await db.select().from(posts).where(and(
+    inArray(posts.id, postIds),
+    eq(posts.isFlagged, false),
+    normalWallPostCondition(),
+    wallPostAudienceCondition(viewerId),
+  ));
   // Preserve ranking order from reactionCounts
   const postMap = new Map(postRows.map((p) => [p.id, p]));
   return postIds.map((id) => postMap.get(id)).filter(Boolean) as Post[];

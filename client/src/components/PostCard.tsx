@@ -3,7 +3,7 @@ import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import { trpc } from "@/lib/trpc";
 import { POST_WORD_LIMIT } from "@shared/const";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Heart, MessageCircle, Trash2, Link2, FileText, Download, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Share2, Smile, Repeat2, Pencil, Check, BadgeCheck, Pin, Bookmark, History, Languages, Flag } from "lucide-react";
+import { Heart, MessageCircle, Trash2, Link2, FileText, Download, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Share2, Smile, Repeat2, Pencil, Check, BadgeCheck, Pin, Bookmark, History, Languages, Flag, Globe2, Lock } from "lucide-react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { Link } from "wouter";
@@ -151,6 +151,8 @@ interface PostData {
   linkDescription: string | null;
   linkImage: string | null;
   linkSiteName: string | null;
+  pageId?: number | null;
+  audience?: string | null;
   docUrl: string | null;
   docName: string | null;
   docSize: number | null;
@@ -1262,7 +1264,14 @@ export default function PostCard({ post, author, likeCount, commentCount = 0, is
                 {author?.name ?? "Unknown User"}
                 {author?.isVerified && <BadgeCheck className="w-4 h-4 text-blue-500 flex-shrink-0" />}
               </p>
-              <p className="text-xs text-muted-foreground">{timeAgo}</p>
+              <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                <span>{timeAgo}</span>
+                {!post.pageId && !post.linkSiteName?.startsWith("page:") && (post.audience === "private" ? (
+                  <span className="inline-flex items-center gap-0.5" title="Private — accepted friends only"><span>·</span><Lock size={11} /><span>Friends</span></span>
+                ) : (
+                  <span className="inline-flex items-center gap-0.5" title="Public — anyone can see"><span>·</span><Globe2 size={11} /><span>Public</span></span>
+                ))}
+              </p>
             </div>
           </Link>
           {canManage && (
