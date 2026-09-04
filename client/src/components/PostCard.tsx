@@ -470,7 +470,7 @@ export interface ReactionBarProps {
 
 export function ReactionBar({ targetId, targetType }: ReactionBarProps) {
   const { themeMode } = useThemeMode();
-  const emojiTheme = themeMode === "lightdark" ? "dark" : "light";
+  const emojiTheme = themeMode === "lightdark" || themeMode === "darkblue" ? "dark" : "light";
   const utils = trpc.useUtils();
   const [showPicker, setShowPicker] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);

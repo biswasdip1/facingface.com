@@ -11,6 +11,7 @@ const THEME_OPTIONS: { mode: ThemeMode; label: string; bg: string; fg: string; r
   { mode: "lightblue", label: "LB", bg: "#d0e8f8", fg: "#0d2a40", ring: "#0d2a40", title: "Light Blue" },
   { mode: "beige",     label: "Be", bg: "#f5ede0", fg: "#3a2a18", ring: "#3a2a18", title: "Soft Beige" },
   { mode: "lightdark", label: "LD", bg: "#383838", fg: "#e0e0e0", ring: "#e0e0e0", title: "Light Dark" },
+  { mode: "darkblue",  label: "DB", bg: "#1976d2", fg: "#ffffff", ring: "#ffffff", title: "Dark Blue" },
 ];
 
 // Sub-component: mobile top-left avatar with robust fallback + optional story ring

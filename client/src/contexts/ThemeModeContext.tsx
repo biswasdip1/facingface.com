@@ -1,8 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 
-export type ThemeMode = "white" | "lightblue" | "beige" | "lightdark";
+export type ThemeMode = "white" | "lightblue" | "beige" | "lightdark" | "darkblue";
 
-const ALL_THEMES: ThemeMode[] = ["white", "lightblue", "beige", "lightdark"];
+const ALL_THEMES: ThemeMode[] = ["white", "lightblue", "beige", "lightdark", "darkblue"];
 
 interface ThemeModeContextValue {
   themeMode: ThemeMode;

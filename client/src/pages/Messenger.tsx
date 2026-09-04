@@ -659,7 +659,11 @@ export default function Messenger() {
   }
 
   return (
-    <div className={cn("h-dvh overflow-hidden bg-[#eef3fb] text-slate-950", themeMode === "lightdark" && "bg-slate-950 text-slate-100")}>
+    <div className={cn(
+      "h-dvh overflow-hidden bg-[#eef3fb] text-slate-950",
+      themeMode === "lightdark" && "bg-slate-950 text-slate-100",
+      themeMode === "darkblue" && "bg-[#1976d2] text-white",
+    )}>
       {outgoingCall && (
         <CallModal
           peerId={outgoingCall.peerId}
@@ -1157,6 +1161,7 @@ const MESSENGER_THEME_OPTIONS: Array<{ mode: ThemeMode; label: string; title: st
   { mode: "lightblue", label: "LB", title: "Light Blue", background: "#eaf4ff", foreground: "#1d4ed8" },
   { mode: "beige", label: "Be", title: "Beige", background: "#f6ead8", foreground: "#8a4f1d" },
   { mode: "lightdark", label: "LD", title: "Light Dark", background: "#374151", foreground: "#ffffff" },
+  { mode: "darkblue", label: "DB", title: "Dark Blue", background: "#1976d2", foreground: "#ffffff" },
 ];
 
 function ThemeModeSelector({ selected, onSelect }: { selected: ThemeMode; onSelect: (value: ThemeMode) => void }) {

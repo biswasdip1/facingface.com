@@ -42,6 +42,7 @@ const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: "lightblue", label: "Light Blue" },
   { value: "beige", label: "Soft Beige" },
   { value: "lightdark", label: "Light Dark" },
+  { value: "darkblue", label: "Dark Blue" },
 ];
 
 export default function SubscriptionTiers() {

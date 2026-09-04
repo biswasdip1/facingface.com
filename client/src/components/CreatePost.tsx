@@ -167,7 +167,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
   const { user } = useAuth();
   const utils = trpc.useUtils();
   const { themeMode } = useThemeMode();
-  const emojiTheme = themeMode === "lightdark" ? "dark" : "light";
+  const emojiTheme = themeMode === "lightdark" || themeMode === "darkblue" ? "dark" : "light";
 
   // ── Media limits from DB (with sensible defaults while loading) ──────────────
   const { data: mediaLimitsRaw } = trpc.admin.getMediaLimits.useQuery(undefined, { staleTime: 5 * 60 * 1000 });
