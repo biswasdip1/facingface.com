@@ -3,7 +3,7 @@ import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import { trpc } from "@/lib/trpc";
 import { POST_WORD_LIMIT } from "@shared/const";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Heart, MessageCircle, Trash2, Link2, FileText, Download, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Share2, Smile, Repeat2, Pencil, Check, BadgeCheck, Pin, Bookmark, History, Languages, Flag, Globe2, Lock } from "lucide-react";
+import { Heart, MessageCircle, Trash2, Link2, FileText, Download, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Share2, Smile, Repeat2, Pencil, Check, BadgeCheck, Pin, Bookmark, History, Languages, Flag, Globe2, Lock, MapPin, Tag } from "lucide-react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { Link } from "wouter";
@@ -16,6 +16,7 @@ import data from "@emoji-mart/data";
 import { useThemeMode } from "@/contexts/ThemeModeContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { getPostFeeling } from "@shared/postSocialMetadata";
 
 function buildArtisticTextBackground(background: string): string {
   return `radial-gradient(circle at 14% 20%, rgba(255,255,255,0.22) 0 13%, transparent 14%), radial-gradient(ellipse at 72% 48%, rgba(255,255,255,0.16) 0 30%, transparent 31%), radial-gradient(circle at 88% 82%, rgba(0,0,0,0.12) 0 20%, transparent 21%), ${background}`;
@@ -135,6 +136,22 @@ interface Author {
   isVerified?: boolean;
 }
 
+type TaggedPerson = { id: number; name: string };
+
+function parseTaggedPeople(value: string | null | undefined): TaggedPerson[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((person): person is TaggedPerson => Boolean(person) && typeof person === "object" && typeof (person as TaggedPerson).id === "number" && Number.isInteger((person as TaggedPerson).id) && typeof (person as TaggedPerson).name === "string")
+      .slice(0, 10)
+      .map((person) => ({ id: person.id, name: person.name.slice(0, 120) }));
+  } catch {
+    return [];
+  }
+}
+
 interface PostData {
   id: number;
   authorId: number;
@@ -153,6 +170,9 @@ interface PostData {
   linkSiteName: string | null;
   pageId?: number | null;
   audience?: string | null;
+  taggedPeople?: string | null;
+  feeling?: string | null;
+  checkInLocation?: string | null;
   docUrl: string | null;
   docName: string | null;
   docSize: number | null;
@@ -1156,6 +1176,8 @@ export default function PostCard({ post, author, likeCount, commentCount = 0, is
   const isUrlOnlyPost = !!post.text && postUrls.length > 0 && post.text.replace(/https?:\/\/[^\s<>"{}|\\^`[\]]+/gi, "").trim().length === 0;
   const compactOnlyUrl = postUrls[0] ?? post.linkUrl;
   const originalPostTextWithoutPreviewUrl = hasLinkPreview ? removePreviewUrlFromText(post.text ?? "", post.linkUrl) : (post.text ?? "");
+  const taggedPeople = parseTaggedPeople(post.taggedPeople);
+  const postFeeling = getPostFeeling(post.feeling);
   const resharedHasLinkPreview = !!resharedPost?.linkUrl && !!(resharedPost.linkTitle || resharedPost.linkImage);
   const resharedPostUrls = resharedPost?.text?.match(/https?:\/\/[^\s<>"{}|\\^`[\]]+/gi) ?? [];
   const resharedIsUrlOnlyPost = !!resharedPost?.text && resharedPostUrls.length > 0 && resharedPost.text.replace(/https?:\/\/[^\s<>"{}|\\^`[\]]+/gi, "").trim().length === 0;
@@ -1314,6 +1336,14 @@ export default function PostCard({ post, author, likeCount, commentCount = 0, is
           <div className="flex items-center gap-1 mb-2 text-[10px] font-black uppercase tracking-widest text-[var(--its-red)]">
             <Pin size={11} />
             <span>Pinned post</span>
+          </div>
+        )}
+
+        {(taggedPeople.length > 0 || postFeeling || post.checkInLocation) && (
+          <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+            {taggedPeople.length > 0 && <span className="inline-flex items-center gap-1"><Tag size={14} className="text-blue-500" /><span>with</span>{taggedPeople.map((person, index) => <span key={person.id} className="inline-flex items-center">{index > 0 && <span className="mr-1">,</span>}<Link href={`/profile/${person.id}`} className="font-semibold text-foreground hover:underline">{person.name}</Link></span>)}</span>}
+            {postFeeling && <span className="inline-flex items-center gap-1"><span>{postFeeling.emoji}</span><span>feeling <strong className="font-semibold text-foreground">{postFeeling.label}</strong></span></span>}
+            {post.checkInLocation && <span className="inline-flex items-center gap-1"><MapPin size={14} className="text-rose-500" /><span>at <strong className="font-semibold text-foreground">{post.checkInLocation}</strong></span></span>}
           </div>
         )}
 

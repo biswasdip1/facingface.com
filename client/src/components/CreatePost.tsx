@@ -44,7 +44,7 @@ function ComposerAvatar({ src, name, size = 10 }: { src?: string | null; name?: 
 }
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Image, Video, X, Loader2, Link2, BarChart2, Plus, Trash2, Smile, Radio, FileText, Music, Film } from "lucide-react";
+import { Image, Video, X, Loader2, Link2, BarChart2, Plus, Trash2, Smile, Radio, FileText, Music, Film, MapPin, Tag, UserPlus } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { toast } from "sonner";
 import Picker from "@emoji-mart/react";
@@ -55,6 +55,7 @@ import { useThemeMode } from "@/contexts/ThemeModeContext";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { POST_WORD_LIMIT } from "@shared/const";
+import { POST_FEELINGS, type PostFeelingValue } from "@shared/postSocialMetadata";
 
 
 const countWords = (value: string): number => {
@@ -276,6 +277,12 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
   // Only ordinary wall posts offer an audience choice. Context posts retain
   // their established Page or Group visibility rules.
   const [audience, setAudience] = useState<"public" | "private">("public");
+  const [showAddToPost, setShowAddToPost] = useState(false);
+  const [activePostExtra, setActivePostExtra] = useState<"tag" | "feeling" | "checkin" | null>(null);
+  const [taggedFriendIds, setTaggedFriendIds] = useState<number[]>([]);
+  const [feeling, setFeeling] = useState<PostFeelingValue | null>(null);
+  const [checkInLocation, setCheckInLocation] = useState("");
+  const { data: acceptedFriends } = trpc.friends.listEnriched.useQuery(undefined, { enabled: modalOpen && !isContextPost });
   const { data: previewData, isFetching: previewLoading } = trpc.linkPreview.fetch.useQuery(
     { url: previewUrl! },
     { enabled: !!previewUrl && !previewDismissed && !showPoll }
@@ -395,6 +402,11 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
     setDocFile(null);
     setScheduledAt(undefined);
     setAudience("public");
+    setShowAddToPost(false);
+    setActivePostExtra(null);
+    setTaggedFriendIds([]);
+    setFeeling(null);
+    setCheckInLocation("");
     setModalOpen(false);
   };
 
@@ -598,8 +610,8 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!text.trim() && photoFiles.length === 0 && !videoFile && !showPoll && !docFile && !audioFile) {
-      toast.error("Please add some text, media, a poll, a document, or audio.");
+    if (!text.trim() && photoFiles.length === 0 && !videoFile && !showPoll && !docFile && !audioFile && taggedFriendIds.length === 0 && !feeling && !checkInLocation.trim()) {
+      toast.error("Please add text, media, a poll, a document, audio, a tag, a feeling, or a check-in.");
       return;
     }
     if (showPoll) {
@@ -755,6 +767,11 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
     };
 
     const fullPayload = { ...postPayload, scheduledAt: scheduledAt ?? undefined };
+    const normalPostExtras = {
+      taggedFriendIds,
+      feeling: feeling ?? undefined,
+      checkInLocation: checkInLocation.trim() || undefined,
+    };
 
     // Save as Reel (video only)
     if (saveAsReel && videoFile && mediaUrl) {
@@ -798,7 +815,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
     } else if (pageHandle) {
       createPagePost.mutate({ handle: pageHandle, ...fullPayload });
     } else {
-      createPost.mutate({ ...fullPayload, audience });
+      createPost.mutate({ ...fullPayload, ...normalPostExtras, audience });
     }
   };
 
@@ -1051,6 +1068,36 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
         )}
       </div>
 
+
+      {/* Tag, feeling, and check-in — standard wall posts only */}
+      {!isContextPost && (
+        <section className="mb-4 rounded-lg border border-border bg-muted/20 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <button type="button" onClick={() => { setShowAddToPost((open) => !open); setActivePostExtra(null); }} className="text-xs font-bold text-foreground hover:text-[var(--its-red)]">Add to your post</button>
+            <div className="flex flex-wrap items-center gap-1">
+              <button type="button" onClick={() => { setShowAddToPost(true); setActivePostExtra("tag"); }} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold transition-colors ${activePostExtra === "tag" || taggedFriendIds.length > 0 ? "border-blue-500 text-blue-600" : "border-border text-muted-foreground hover:text-foreground"}`} title="Tag accepted friends"><UserPlus size={14} />Tag</button>
+              <button type="button" onClick={() => { setShowAddToPost(true); setActivePostExtra("feeling"); }} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold transition-colors ${activePostExtra === "feeling" || feeling ? "border-amber-500 text-amber-600" : "border-border text-muted-foreground hover:text-foreground"}`} title="Add a feeling or activity"><Smile size={14} />Feeling</button>
+              <button type="button" onClick={() => { setShowAddToPost(true); setActivePostExtra("checkin"); }} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold transition-colors ${activePostExtra === "checkin" || checkInLocation.trim() ? "border-rose-500 text-rose-600" : "border-border text-muted-foreground hover:text-foreground"}`} title="Check in to a place"><MapPin size={14} />Check in</button>
+            </div>
+          </div>
+          {(taggedFriendIds.length > 0 || feeling || checkInLocation.trim()) && (
+            <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
+              {taggedFriendIds.length > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2 py-1 font-semibold text-blue-700"><Tag size={12} />{taggedFriendIds.length} friend{taggedFriendIds.length === 1 ? "" : "s"} tagged <button type="button" onClick={() => setTaggedFriendIds([])} aria-label="Remove tagged friends"><X size={12} /></button></span>}
+              {feeling && <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-1 font-semibold text-amber-700">{POST_FEELINGS.find((item) => item.value === feeling)?.emoji} Feeling {POST_FEELINGS.find((item) => item.value === feeling)?.label} <button type="button" onClick={() => setFeeling(null)} aria-label="Remove feeling"><X size={12} /></button></span>}
+              {checkInLocation.trim() && <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/10 px-2 py-1 font-semibold text-rose-700"><MapPin size={12} />{checkInLocation.trim()} <button type="button" onClick={() => setCheckInLocation("")} aria-label="Remove check-in"><X size={12} /></button></span>}
+            </div>
+          )}
+          {showAddToPost && activePostExtra === "tag" && (
+            <div className="mt-3 border-t border-border pt-3"><div className="mb-2 flex items-center justify-between"><p className="text-xs font-bold text-foreground">Tag accepted friends <span className="font-normal text-muted-foreground">(up to 10)</span></p><button type="button" onClick={() => setActivePostExtra(null)} className="text-xs text-muted-foreground hover:text-foreground">Close</button></div>{acceptedFriends?.length ? <div className="grid max-h-40 gap-1 overflow-y-auto sm:grid-cols-2">{acceptedFriends.map((row) => { const friend = row.friend; if (!friend) return null; const selected = taggedFriendIds.includes(friend.id); return <label key={friend.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-background"><input type="checkbox" checked={selected} onChange={() => setTaggedFriendIds((current) => selected ? current.filter((id) => id !== friend.id) : current.length < 10 ? [...current, friend.id] : current)} /><span className="min-w-0 truncate">{friend.name ?? "Friend"}</span></label>; })}</div> : <p className="text-xs text-muted-foreground">You can tag accepted friends after connecting with them.</p>}</div>
+          )}
+          {showAddToPost && activePostExtra === "feeling" && (
+            <div className="mt-3 border-t border-border pt-3"><div className="mb-2 flex items-center justify-between"><p className="text-xs font-bold text-foreground">How are you feeling or what are you doing?</p><button type="button" onClick={() => setActivePostExtra(null)} className="text-xs text-muted-foreground hover:text-foreground">Close</button></div><div className="grid gap-1 sm:grid-cols-2">{POST_FEELINGS.map((item) => <button key={item.value} type="button" onClick={() => { setFeeling(item.value); setActivePostExtra(null); }} className={`flex items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors ${feeling === item.value ? "bg-amber-500/15 text-foreground" : "hover:bg-background text-muted-foreground"}`}><span>{item.emoji}</span><span>{item.label}</span></button>)}</div></div>
+          )}
+          {showAddToPost && activePostExtra === "checkin" && (
+            <div className="mt-3 border-t border-border pt-3"><div className="mb-2 flex items-center justify-between"><p className="text-xs font-bold text-foreground">Check in</p><button type="button" onClick={() => setActivePostExtra(null)} className="text-xs text-muted-foreground hover:text-foreground">Close</button></div><div className="flex gap-2"><input value={checkInLocation} onChange={(event) => setCheckInLocation(event.target.value)} maxLength={160} autoFocus placeholder="Add a town, venue, or place" className="min-w-0 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-[var(--its-red)]/35" /><button type="button" onClick={() => setActivePostExtra(null)} className="rounded-md bg-[var(--its-red)] px-3 py-2 text-xs font-bold text-white">Done</button></div><p className="mt-1.5 text-[11px] text-muted-foreground">This uses a place name only. It does not share your live location.</p></div>
+          )}
+        </section>
+      )}
 
       {/* Background color picker */}
       {showColorPicker && (

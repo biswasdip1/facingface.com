@@ -528,6 +528,15 @@ export async function ensureLegacyRuntimeSchema(): Promise<void> {
         await db.execute(sql`ALTER TABLE "posts" ALTER COLUMN "audience" SET DEFAULT 'public'`);
         await db.execute(sql`ALTER TABLE "posts" ALTER COLUMN "audience" SET NOT NULL`);
       }
+      if (!postColumns.has("taggedPeople")) {
+        await db.execute(sql`ALTER TABLE "posts" ADD COLUMN "taggedPeople" text`);
+      }
+      if (!postColumns.has("feeling")) {
+        await db.execute(sql`ALTER TABLE "posts" ADD COLUMN "feeling" varchar(32)`);
+      }
+      if (!postColumns.has("checkInLocation")) {
+        await db.execute(sql`ALTER TABLE "posts" ADD COLUMN "checkInLocation" varchar(160)`);
+      }
       const postIndexes = await existingIndexNames("posts");
       if (!postIndexes.has("posts_pageId_idx")) {
         await db.execute(sql`CREATE INDEX "posts_pageId_idx" ON "posts" ("pageId")`);

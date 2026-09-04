@@ -94,6 +94,11 @@ export const posts = pgTable("posts", {
   pageId: integer("pageId"),
   // Standard wall-post audience. Existing rows and new posts default to public.
   audience: varchar("audience", { length: 10 }).default("public").notNull(),
+  // Social metadata applies only to ordinary wall posts. Tagged names are resolved
+  // server-side from accepted friend IDs at publication time.
+  taggedPeople: text("taggedPeople"),
+  feeling: varchar("feeling", { length: 32 }),
+  checkInLocation: varchar("checkInLocation", { length: 160 }),
   docUrl: text("docUrl"),
   docName: varchar("docName", { length: 255 }),
   docSize: integer("docSize"),

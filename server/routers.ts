@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME, ONE_YEAR_MS, POST_WORD_LIMIT } from "@shared/const";
+import { POST_FEELING_VALUES } from "@shared/postSocialMetadata";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { broadcastRouter } from "./_core/broadcastRouter";
@@ -611,17 +612,36 @@ const postsRouter = router({
         photo2Alt: z.string().max(500).optional(),
         photo3Alt: z.string().max(500).optional(),
         videoPosterUrl: z.string().optional(),
+        taggedFriendIds: z.array(z.number().int().positive()).max(10).default([]),
+        feeling: z.enum(POST_FEELING_VALUES).optional(),
+        checkInLocation: z.string().trim().min(1).max(160).optional(),
         audience: z.enum(["public", "private"]).default("public"),
         scheduledAt: z.date().optional(),  // if set, post is saved as scheduled
       })
     )
     .mutation(async ({ ctx, input }) => {
-      if (!input.text && !input.mediaUrl && !input.docUrl && !input.audioUrl && !input.poll) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Post must have text, media, a poll, or a document." });
+      if (!input.text && !input.mediaUrl && !input.docUrl && !input.audioUrl && !input.poll && input.taggedFriendIds.length === 0 && !input.feeling && !input.checkInLocation) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Post must have text, media, a poll, a document, a tag, a feeling, or a check-in." });
       }
 
       // ── 24-hour upload rate limits ──────────────────────────────────────────
       const userId = ctx.user.id;
+      const taggedFriendIds = [...new Set(input.taggedFriendIds)].filter((id) => id !== userId);
+      const taggedPeople: Array<{ id: number; name: string }> = [];
+      for (const friendId of taggedFriendIds) {
+        if (!(await areFriends(userId, friendId))) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "You can tag only accepted friends." });
+        }
+        const friend = await getUserById(friendId);
+        if (!friend) throw new TRPCError({ code: "BAD_REQUEST", message: "A selected friend could not be found." });
+        taggedPeople.push({ id: friend.id, name: friend.name?.trim() || "Friend" });
+      }
+      if (input.checkInLocation) {
+        const locationModeration = await moderateContent(input.checkInLocation);
+        if (locationModeration.flagged) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "The check-in location could not be used. Please choose a different place name." });
+        }
+      }
       const LIMIT_MSG = "Today's limit has been reached, upload again after 24 hrs., due to space control we do have limit system for while.";
       if (input.mediaType === "video") {
         const used = await countUserPostsByTypeInWindow(userId, "video");
@@ -755,6 +775,9 @@ const postsRouter = router({
         photo2Alt: input.photo2Alt ?? null,
         photo3Alt: input.photo3Alt ?? null,
         videoPosterUrl: resolvedPosterUrl,
+        taggedPeople: taggedPeople.length > 0 ? JSON.stringify(taggedPeople) : null,
+        feeling: input.feeling ?? null,
+        checkInLocation: input.checkInLocation?.trim() || null,
         audience: input.audience,
         scheduledAt: input.scheduledAt ?? null,
       });
