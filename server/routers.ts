@@ -183,6 +183,9 @@ import {
   getOrgPageById,
   listOrgPages,
   isPageFollower,
+  getPageFollowRecord,
+  getPendingPageFollowRequests,
+  reviewPageFollowRequest,
   followOrgPage,
   unfollowOrgPage,
   isPageAdmin,
@@ -205,6 +208,9 @@ import {
   joinPublicGroup,
   leavePublicGroup,
   getPublicGroupMembership,
+  getPublicGroupMembershipRecord,
+  getPendingPublicGroupJoinRequests,
+  reviewPublicGroupJoinRequest,
   getPublicGroupMembers,
   setPublicGroupMemberRole,
   createPublicGroupPost,
@@ -2872,8 +2878,10 @@ const pagesRouter = router({
       if (!page) throw new TRPCError({ code: "NOT_FOUND", message: "Page not found" });
       const following = ctx.user ? await isPageFollower(page.id, ctx.user.id) : false;
       const isAdmin = ctx.user ? await isPageAdmin(page.id, ctx.user.id) : false;
+      const followRecord = ctx.user ? await getPageFollowRecord(page.id, ctx.user.id) : undefined;
       const owner = await getUserById(page.ownerId);
-      return { ...page, following, isAdmin, ownerName: owner?.name ?? null };
+      const isPrivate = page.visibility === "private";
+      return { ...page, following, isAdmin, followStatus: followRecord?.status ?? null, canViewContent: !isPrivate || following || isAdmin, ownerName: owner?.name ?? null };
     }),
 
   create: protectedProcedure
@@ -2902,6 +2910,7 @@ const pagesRouter = router({
       location: z.string().max(100).nullable().optional(),
       logo: z.string().nullable().optional(),
       coverPhoto: z.string().nullable().optional(),
+      visibility: z.enum(["public", "private"]).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const page = await getOrgPageByHandle(input.handle);
@@ -2918,8 +2927,8 @@ const pagesRouter = router({
     .mutation(async ({ input, ctx }) => {
       const page = await getOrgPageByHandle(input.handle);
       if (!page) throw new TRPCError({ code: "NOT_FOUND" });
-      await followOrgPage(page.id, ctx.user.id);
-      return { success: true };
+      const status = await followOrgPage(page.id, ctx.user.id, page.visibility === "private");
+      return { success: true, status };
     }),
 
   unfollow: protectedProcedure
@@ -2935,11 +2944,37 @@ const pagesRouter = router({
     return getOwnedPages(ctx.user.id);
   }),
 
+  getFollowRequests: protectedProcedure
+    .input(z.object({ handle: z.string() }))
+    .query(async ({ input, ctx }) => {
+      const page = await getOrgPageByHandle(input.handle);
+      if (!page) throw new TRPCError({ code: "NOT_FOUND" });
+      if (!(await isPageAdmin(page.id, ctx.user.id))) throw new TRPCError({ code: "FORBIDDEN" });
+      const requests = await getPendingPageFollowRequests(page.id);
+      const users = await Promise.all(requests.map((request) => getUserById(request.userId)));
+      return requests.map((request, index) => ({ ...request, user: users[index] ? { id: users[index]!.id, name: users[index]!.name, avatar: users[index]!.avatar ?? null } : null }));
+    }),
+
+  reviewFollowRequest: protectedProcedure
+    .input(z.object({ handle: z.string(), userId: z.number().int(), approve: z.boolean() }))
+    .mutation(async ({ input, ctx }) => {
+      const page = await getOrgPageByHandle(input.handle);
+      if (!page) throw new TRPCError({ code: "NOT_FOUND" });
+      if (!(await isPageAdmin(page.id, ctx.user.id))) throw new TRPCError({ code: "FORBIDDEN" });
+      await reviewPageFollowRequest(page.id, input.userId, input.approve);
+      return { success: true };
+    }),
+
   getPosts: publicProcedure
     .input(z.object({ handle: z.string(), limit: z.number().default(20), offset: z.number().default(0) }))
     .query(async ({ input, ctx }) => {
       const page = await getOrgPageByHandle(input.handle);
       if (!page) throw new TRPCError({ code: "NOT_FOUND" });
+      const following = ctx.user ? await isPageFollower(page.id, ctx.user.id) : false;
+      const isAdmin = ctx.user ? await isPageAdmin(page.id, ctx.user.id) : false;
+      if (page.visibility === "private" && !following && !isAdmin) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Follow request approval is required to view this private Page." });
+      }
       const pagePosts = await getPagePostsByPageId(page.id, input.limit, input.offset);
       if (pagePosts.length === 0) return { posts: [], authors: {}, likeCounts: {} };
       const authorIds = Array.from(new Set(pagePosts.map(p => p.authorId)));
@@ -3157,11 +3192,12 @@ const publicGroupsRouter = router({
       name: z.string().min(2).max(150),
       description: z.string().max(1000).optional(),
       category: z.string().max(80).optional(),
+      visibility: z.enum(["public", "private"]).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const existing = await getPublicGroupByHandle(input.handle);
       if (existing) throw new TRPCError({ code: "CONFLICT", message: "Handle already taken." });
-      const groupId = await createPublicGroup({ ...input, createdBy: ctx.user!.id });
+      const groupId = await createPublicGroup({ ...input, visibility: input.visibility ?? "public", createdBy: ctx.user!.id });
       await joinPublicGroup(groupId, ctx.user!.id, "admin");
       return { groupId, handle: input.handle };
     }),
@@ -3179,6 +3215,8 @@ const publicGroupsRouter = router({
       if (!foundGroup) return null;
       const group = await normaliseUnsafePublicGroupHandle(foundGroup);
       const membership = ctx.user ? await getPublicGroupMembership(group.id, ctx.user.id) : null;
+      const membershipRecord = ctx.user ? await getPublicGroupMembershipRecord(group.id, ctx.user.id) : null;
+      const isPrivate = group.visibility === "private";
       return {
         ...group,
         requestedHandle: input.handle,
@@ -3187,6 +3225,8 @@ const publicGroupsRouter = router({
         isAdmin: membership?.role === "admin",
         isModerator: membership?.role === "moderator",
         memberRole: membership?.role ?? null,
+        membershipStatus: membershipRecord?.status ?? null,
+        canViewContent: !isPrivate || !!membership,
       };
     }),
 
@@ -3196,6 +3236,7 @@ const publicGroupsRouter = router({
       name: z.string().min(2).max(150).optional(),
       description: z.string().max(1000).optional(),
       category: z.string().max(80).optional(),
+      visibility: z.enum(["public", "private"]).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const group = await getPublicGroupByHandle(input.handle);
@@ -3212,8 +3253,8 @@ const publicGroupsRouter = router({
     .mutation(async ({ input, ctx }) => {
       const group = await getPublicGroupByHandle(input.handle);
       if (!group) throw new TRPCError({ code: "NOT_FOUND" });
-      await joinPublicGroup(group.id, ctx.user!.id, "member");
-      return { success: true };
+      const status = await joinPublicGroup(group.id, ctx.user!.id, "member", group.visibility === "private");
+      return { success: true, status };
     }),
 
   leave: protectedProcedure
@@ -3228,15 +3269,40 @@ const publicGroupsRouter = router({
 
   getMembers: publicProcedure
     .input(z.object({ handle: z.string(), limit: z.number().default(50) }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const group = await getPublicGroupByHandle(input.handle);
       if (!group) return [];
+      const membership = ctx.user ? await getPublicGroupMembership(group.id, ctx.user.id) : null;
+      if (group.visibility === "private" && !membership) throw new TRPCError({ code: "FORBIDDEN", message: "Join request approval is required to view private Group members." });
       const members = await getPublicGroupMembers(group.id, input.limit);
       const enriched = await Promise.all(members.map(async (m) => {
         const user = await getUserById(m.userId);
         return { ...m, user: user ? { id: user.id, name: user.name, avatar: user.avatar ?? null, isVerified: user.isVerified } : null };
       }));
       return enriched.filter(m => m.user !== null);
+    }),
+
+  getJoinRequests: protectedProcedure
+    .input(z.object({ handle: z.string() }))
+    .query(async ({ input, ctx }) => {
+      const group = await getPublicGroupByHandle(input.handle);
+      if (!group) throw new TRPCError({ code: "NOT_FOUND" });
+      const membership = await getPublicGroupMembership(group.id, ctx.user.id);
+      if (membership?.role !== "admin" && membership?.role !== "moderator") throw new TRPCError({ code: "FORBIDDEN" });
+      const requests = await getPendingPublicGroupJoinRequests(group.id);
+      const users = await Promise.all(requests.map((request) => getUserById(request.userId)));
+      return requests.map((request, index) => ({ ...request, user: users[index] ? { id: users[index]!.id, name: users[index]!.name, avatar: users[index]!.avatar ?? null } : null }));
+    }),
+
+  reviewJoinRequest: protectedProcedure
+    .input(z.object({ handle: z.string(), userId: z.number().int(), approve: z.boolean() }))
+    .mutation(async ({ input, ctx }) => {
+      const group = await getPublicGroupByHandle(input.handle);
+      if (!group) throw new TRPCError({ code: "NOT_FOUND" });
+      const membership = await getPublicGroupMembership(group.id, ctx.user.id);
+      if (membership?.role !== "admin" && membership?.role !== "moderator") throw new TRPCError({ code: "FORBIDDEN" });
+      await reviewPublicGroupJoinRequest(group.id, input.userId, input.approve);
+      return { success: true };
     }),
 
   setMemberRole: protectedProcedure
@@ -3396,9 +3462,13 @@ const publicGroupsRouter = router({
 
   getPosts: publicProcedure
     .input(z.object({ handle: z.string(), limit: z.number().default(20), offset: z.number().default(0) }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const group = await getPublicGroupByHandle(input.handle);
       if (!group) return { posts: [], authors: {} };
+      const membership = ctx.user ? await getPublicGroupMembership(group.id, ctx.user.id) : null;
+      if (group.visibility === "private" && !membership) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Join request approval is required to view this private Group." });
+      }
       const posts = await getPublicGroupPosts(group.id, input.limit, input.offset);
       const commentCounts = await getPublicGroupPostCommentCounts(posts.map((post) => post.id));
       const authorIds = Array.from(new Set(posts.map(p => p.authorId)));

@@ -161,7 +161,7 @@ export default function GroupView() {
   const utils = trpc.useUtils();
 
   const [editOpen, setEditOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ name: "", description: "", category: "" });
+  const [editForm, setEditForm] = useState<{ name: string; description: string; category: string; visibility: "public" | "private" }>({ name: "", description: "", category: "", visibility: "public" });
   const coverInputRef = useRef<HTMLInputElement>(null);
   const [coverUploading, setCoverUploading] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -172,11 +172,15 @@ export default function GroupView() {
   );
   const { data: postsData, isLoading: postsLoading } = trpc.publicGroups.getPosts.useQuery(
     { handle, limit: 30 },
-    { enabled: !!handle }
+    { enabled: !!handle && !!group?.canViewContent }
   );
   const { data: members = [] } = trpc.publicGroups.getMembers.useQuery(
     { handle, limit: 50 },
-    { enabled: !!handle }
+    { enabled: !!handle && (group?.visibility !== "private" || !!group?.isMember) }
+  );
+  const { data: joinRequests, refetch: refetchJoinRequests } = trpc.publicGroups.getJoinRequests.useQuery(
+    { handle },
+    { enabled: !!handle && !!group?.isAdmin && group?.visibility === "private" }
   );
 
   // Old Groups created with a pasted URL are retained, but immediately move to
@@ -188,9 +192,9 @@ export default function GroupView() {
   }, [group?.canonicalHandle, handle, navigate]);
 
   const joinMutation = trpc.publicGroups.join.useMutation({
-    onSuccess: () => {
+    onSuccess: (result) => {
       utils.publicGroups.getByHandle.invalidate({ handle });
-      toast.success("You joined the group!");
+      toast.success(result.status === "pending" ? "Join request sent to Group admins." : "You joined the group!");
     },
     onError: (err) => toast.error(err.message),
   });
@@ -201,6 +205,15 @@ export default function GroupView() {
       toast.success("You left the group.");
     },
     onError: (err) => toast.error(err.message),
+  });
+
+  const reviewJoinRequestMutation = trpc.publicGroups.reviewJoinRequest.useMutation({
+    onSuccess: () => {
+      refetchJoinRequests();
+      utils.publicGroups.getByHandle.invalidate({ handle });
+      utils.publicGroups.getMembers.invalidate({ handle });
+    },
+    onError: (error) => toast.error(error.message),
   });
 
   const updateMutation = trpc.publicGroups.update.useMutation({
@@ -361,7 +374,7 @@ export default function GroupView() {
             <h1 className="text-2xl font-bold">{group.name}</h1>
             <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground flex-wrap">
               <Globe className="w-4 h-4" />
-              <span>Public Group</span>
+              <span>{group.visibility === "private" ? "Private Group" : "Public Group"}</span>
               <span>·</span>
               <Users className="w-4 h-4" />
               <span>{group.memberCount.toLocaleString()} member{group.memberCount !== 1 ? "s" : ""}</span>
@@ -394,7 +407,7 @@ export default function GroupView() {
                 size="sm"
                 className="gap-1.5"
                 onClick={() => {
-                  setEditForm({ name: group.name, description: group.description ?? "", category: group.category ?? "" });
+                  setEditForm({ name: group.name, description: group.description ?? "", category: group.category ?? "", visibility: group.visibility === "private" ? "private" : "public" });
                   setEditOpen(true);
                 }}
               >
@@ -403,9 +416,13 @@ export default function GroupView() {
               </Button>
             )}
             {user && !isMember && !isSuspended && (
-              <Button size="sm" onClick={() => joinMutation.mutate({ handle })} disabled={joinMutation.isPending}>
-                {joinMutation.isPending ? "Joining…" : "+ Join Group"}
-              </Button>
+              group.membershipStatus === "pending" ? (
+                <Button size="sm" variant="outline" disabled>Request Pending</Button>
+              ) : (
+                <Button size="sm" onClick={() => joinMutation.mutate({ handle })} disabled={joinMutation.isPending}>
+                  {joinMutation.isPending ? "Sending…" : group.visibility === "private" ? "Request to Join" : "+ Join Group"}
+                </Button>
+              )
             )}
             {user && isMember && !isAdmin && (
               <Button
@@ -452,12 +469,18 @@ export default function GroupView() {
           )}
           {!isSuspended && user && !isMember && (
             <div className="bg-card border border-border rounded-xl p-4 text-center text-sm text-muted-foreground">
-              Join this group to post and interact with members.
+              {group.visibility === "private" ? (group.membershipStatus === "pending" ? "Your join request is waiting for Group approval." : "This Group is private. Request to join to see posts and interact with members.") : "Join this group to post and interact with members."}
             </div>
           )}
 
           {/* Posts feed */}
-          {postsLoading ? (
+          {!group.canViewContent ? (
+            <div className="bg-card border border-border rounded-xl p-10 text-center">
+              <Shield className="w-10 h-10 text-muted-foreground mx-auto mb-2" />
+              <p className="font-medium">This Group is private</p>
+              <p className="text-sm text-muted-foreground mt-1">Posts and member details are visible only after a Group admin approves the join request.</p>
+            </div>
+          ) : postsLoading ? (
             <div className="space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
                 <div key={i} className="h-32 rounded-xl bg-muted animate-pulse" />
@@ -497,7 +520,7 @@ export default function GroupView() {
             <div className="space-y-2 text-sm">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Globe className="w-4 h-4" />
-                <span>Public — anyone can see posts</span>
+                <span>{group.visibility === "private" ? "Private — approved members can see posts" : "Public — anyone can see posts"}</span>
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Users className="w-4 h-4" />
@@ -512,6 +535,7 @@ export default function GroupView() {
               <TabsList className="w-full mb-3">
                 <TabsTrigger value="members" className="flex-1 text-xs">Members ({members.length})</TabsTrigger>
                 {isAdmin && <TabsTrigger value="manage" className="flex-1 text-xs">Manage</TabsTrigger>}
+                {isAdmin && group.visibility === "private" && <TabsTrigger value="requests" className="flex-1 text-xs">Requests ({joinRequests?.length ?? 0})</TabsTrigger>}
               </TabsList>
 
               <TabsContent value="members" className="space-y-2 max-h-80 overflow-y-auto">
@@ -561,8 +585,14 @@ export default function GroupView() {
                 )}
               </TabsContent>
 
+              {isAdmin && group.visibility === "private" && (
+                <TabsContent value="requests" className="space-y-2 max-h-80 overflow-y-auto">
+                {(joinRequests ?? []).length === 0 ? <p className="text-xs text-muted-foreground">No pending requests.</p> : joinRequests?.map((request) => <div key={request.id} className="flex items-center justify-between gap-2"><span className="text-xs truncate">{request.user?.name ?? "Member"}</span><div className="flex gap-1"><Button size="sm" className="h-7 text-xs" onClick={() => reviewJoinRequestMutation.mutate({ handle, userId: request.userId, approve: true })}>Approve</Button><Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => reviewJoinRequestMutation.mutate({ handle, userId: request.userId, approve: false })}>Decline</Button></div></div>)}
+              </TabsContent>
+              )}
+
               {isAdmin && (
-                <TabsContent value="manage" className="space-y-2 max-h-80 overflow-y-auto">
+              <TabsContent value="manage" className="space-y-3 max-h-80 overflow-y-auto">
                   {members.filter((m) => m.userId !== user?.id).map((m) => (
                     <div key={m.id} className="flex items-center gap-2">
                       <Avatar className="w-8 h-8">
@@ -641,6 +671,14 @@ export default function GroupView() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div>
+              <Label>Visibility</Label>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                <Button type="button" variant={editForm.visibility === "public" ? "default" : "outline"} onClick={() => setEditForm((f) => ({ ...f, visibility: "public" }))}>Public</Button>
+                <Button type="button" variant={editForm.visibility === "private" ? "default" : "outline"} onClick={() => setEditForm((f) => ({ ...f, visibility: "private" }))}>Private</Button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">Private Groups require an admin or moderator to approve join requests before members can see posts.</p>
             </div>
             <Button
               className="w-full"

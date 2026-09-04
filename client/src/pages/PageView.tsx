@@ -29,7 +29,7 @@ export default function PageView() {
   const [postText, setPostText] = useState("");
   const [editForm, setEditForm] = useState<{
     name?: string; description?: string; category?: string;
-    website?: string; location?: string;
+    website?: string; location?: string; visibility?: "public" | "private";
   }>({});
   const [addAdminQuery, setAddAdminQuery] = useState("");
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -42,7 +42,7 @@ export default function PageView() {
 
   const { data: postsData } = trpc.pages.getPosts.useQuery(
     { handle },
-    { enabled: !!handle }
+    { enabled: !!handle && !!page?.canViewContent }
   );
 
   const { data: admins, refetch: refetchAdmins } = trpc.pages.getAdmins.useQuery(
@@ -50,16 +50,30 @@ export default function PageView() {
     { enabled: !!handle && !!(page?.isAdmin) }
   );
 
+  const { data: followRequests, refetch: refetchFollowRequests } = trpc.pages.getFollowRequests.useQuery(
+    { handle },
+    { enabled: !!handle && !!page?.isAdmin && page?.visibility === "private" }
+  );
+
+  const reviewFollowRequestMutation = trpc.pages.reviewFollowRequest.useMutation({
+    onSuccess: () => {
+      refetchFollowRequests();
+      utils.pages.getByHandle.invalidate({ handle });
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
   const { data: searchResults } = trpc.users.search.useQuery(
     { query: addAdminQuery },
     { enabled: addAdminQuery.trim().length >= 2 }
   );
 
   const followMutation = trpc.pages.follow.useMutation({
-    onSuccess: () => {
+    onSuccess: (result) => {
       utils.pages.getByHandle.invalidate({ handle });
-      toast.success(`You are now following ${page?.name}`);
+      toast.success(result.status === "pending" ? `Follow request sent to ${page?.name}` : `You are now following ${page?.name}`);
     },
+    onError: (error) => toast.error(error.message),
   });
 
   const unfollowMutation = trpc.pages.unfollow.useMutation({
@@ -155,6 +169,7 @@ export default function PageView() {
       category: page.category ?? "",
       website: page.website ?? "",
       location: page.location ?? "",
+      visibility: page.visibility === "private" ? "private" : "public",
     });
     setEditOpen(true);
   };
@@ -291,6 +306,10 @@ export default function PageView() {
                     >
                       <UserMinus className="w-3.5 h-3.5" /> Unfollow
                     </Button>
+                  ) : page.followStatus === "pending" ? (
+                    <Button variant="outline" size="sm" disabled className="gap-1.5">
+                      <UserPlus className="w-3.5 h-3.5" /> Request Pending
+                    </Button>
                   ) : (
                     <Button
                       size="sm"
@@ -298,7 +317,7 @@ export default function PageView() {
                       disabled={followMutation.isPending}
                       className="bg-red-600 hover:bg-red-700 text-white gap-1.5"
                     >
-                      <UserPlus className="w-3.5 h-3.5" /> Follow
+                      <UserPlus className="w-3.5 h-3.5" /> {page.visibility === "private" ? "Request to Follow" : "Follow"}
                     </Button>
                   )
                 )}
@@ -308,6 +327,7 @@ export default function PageView() {
             {/* Meta row */}
             <div className="flex flex-wrap gap-3 mt-2 text-sm text-muted-foreground">
               {page.category && <Badge variant="secondary">{page.category}</Badge>}
+              <Badge variant={page.visibility === "private" ? "outline" : "secondary"}>{page.visibility === "private" ? "Private Page" : "Public Page"}</Badge>
               <span className="flex items-center gap-1">
                 <Users className="w-3.5 h-3.5" />
                 {page.followerCount ?? 0} followers
@@ -350,7 +370,14 @@ export default function PageView() {
           )}
 
           {/* Posts list */}
-          {posts.length === 0 ? (
+          {!page.canViewContent ? (
+            <div className="bg-card border border-border rounded-xl p-8 text-center text-muted-foreground">
+              <AlertTriangle className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p className="font-medium text-foreground">This Page is private</p>
+              <p className="text-sm mt-1">Its posts are visible only to approved followers and Page admins.</p>
+              {page.followStatus === "pending" && <p className="text-xs mt-2">Your follow request is waiting for Page approval.</p>}
+            </div>
+          ) : posts.length === 0 ? (
             <div className="bg-card border border-border rounded-xl p-8 text-center text-muted-foreground">
               <Pencil className="w-8 h-8 mx-auto mb-2 opacity-30" />
               <p className="text-sm">No posts yet</p>
@@ -416,6 +443,13 @@ export default function PageView() {
               </div>
             </div>
           </div>
+
+          {page.isAdmin && page.visibility === "private" && (
+            <div className="bg-card border border-border rounded-xl p-4">
+              <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2"><UserPlus className="w-4 h-4 text-red-600" /> Follow Requests</h3>
+              {(followRequests ?? []).length === 0 ? <p className="text-sm text-muted-foreground">No pending requests.</p> : <div className="space-y-2">{followRequests?.map((request) => <div key={request.id} className="flex items-center justify-between gap-2"><span className="text-sm truncate">{request.user?.name ?? "Member"}</span><div className="flex gap-1"><Button size="sm" className="h-7" onClick={() => reviewFollowRequestMutation.mutate({ handle, userId: request.userId, approve: true })}>Approve</Button><Button size="sm" variant="outline" className="h-7" onClick={() => reviewFollowRequestMutation.mutate({ handle, userId: request.userId, approve: false })}>Decline</Button></div></div>)}</div>}
+            </div>
+          )}
 
           {/* Admin management card (owner only) */}
           {user && page.ownerId === user.id && (
@@ -532,6 +566,14 @@ export default function PageView() {
                     onChange={(e) => setEditForm(f => ({ ...f, location: e.target.value }))}
                   />
                 </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Visibility</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button type="button" variant={editForm.visibility !== "private" ? "default" : "outline"} onClick={() => setEditForm(f => ({ ...f, visibility: "public" }))}>Public</Button>
+                  <Button type="button" variant={editForm.visibility === "private" ? "default" : "outline"} onClick={() => setEditForm(f => ({ ...f, visibility: "private" }))}>Private</Button>
+                </div>
+                <p className="text-xs text-muted-foreground">Private Pages show posts only to approved followers and Page admins.</p>
               </div>
               <div className="space-y-1.5">
                 <Label>Website</Label>

@@ -425,9 +425,38 @@ export async function ensureLegacyRuntimeSchema(): Promise<void> {
       if (!groupColumns.has("legacyHandle")) {
         await db.execute(sql`ALTER TABLE "public_groups" ADD COLUMN "legacyHandle" varchar(100)`);
       }
+      if (!groupColumns.has("visibility")) {
+        await db.execute(sql`ALTER TABLE "public_groups" ADD COLUMN "visibility" varchar(10) NOT NULL DEFAULT 'public'`);
+      }
       const groupIndexes = await existingIndexNames("public_groups");
       if (!groupIndexes.has("public_groups_legacyHandle_idx")) {
         await db.execute(sql`CREATE INDEX "public_groups_legacyHandle_idx" ON "public_groups" ("legacyHandle")`);
+      }
+    }
+    if (await relationExists("public_group_members")) {
+      const membershipColumns = await existingColumns("public_group_members");
+      if (!membershipColumns.has("status")) {
+        await db.execute(sql`ALTER TABLE "public_group_members" ADD COLUMN "status" varchar(12) NOT NULL DEFAULT 'approved'`);
+      }
+      const membershipIndexes = await existingIndexNames("public_group_members");
+      if (!membershipIndexes.has("public_group_member_request_idx")) {
+        await db.execute(sql`CREATE INDEX "public_group_member_request_idx" ON "public_group_members" ("groupId", "status")`);
+      }
+    }
+    if (await relationExists("org_pages")) {
+      const pageColumns = await existingColumns("org_pages");
+      if (!pageColumns.has("visibility")) {
+        await db.execute(sql`ALTER TABLE "org_pages" ADD COLUMN "visibility" varchar(10) NOT NULL DEFAULT 'public'`);
+      }
+    }
+    if (await relationExists("page_followers")) {
+      const followerColumns = await existingColumns("page_followers");
+      if (!followerColumns.has("status")) {
+        await db.execute(sql`ALTER TABLE "page_followers" ADD COLUMN "status" varchar(12) NOT NULL DEFAULT 'approved'`);
+      }
+      const followerIndexes = await existingIndexNames("page_followers");
+      if (!followerIndexes.has("page_follower_request_idx")) {
+        await db.execute(sql`CREATE INDEX "page_follower_request_idx" ON "page_followers" ("pageId", "status")`);
       }
     }
 
@@ -2860,40 +2889,70 @@ export async function listOrgPages(search?: string, limit = 24, offset = 0): Pro
   if (!db) return [];
   if (search && search.trim().length > 0) {
     return db.select().from(orgPages)
-      .where(sql`LOWER(${orgPages.name}) LIKE ${`%${search.trim().toLowerCase()}%`}`)
+      .where(and(eq(orgPages.visibility, "public"), sql`LOWER(${orgPages.name}) LIKE ${`%${search.trim().toLowerCase()}%`}`))
       .orderBy(desc(orgPages.followerCount))
       .limit(limit).offset(offset);
   }
   return db.select().from(orgPages)
+    .where(eq(orgPages.visibility, "public"))
     .orderBy(desc(orgPages.followerCount))
     .limit(limit).offset(offset);
 }
 
-export async function isPageFollower(pageId: number, userId: number): Promise<boolean> {
+export async function getPageFollowRecord(pageId: number, userId: number): Promise<PageFollower | undefined> {
   const db = await getDb();
-  if (!db) return false;
+  if (!db) return undefined;
   const [row] = await db.select().from(pageFollowers)
     .where(and(eq(pageFollowers.pageId, pageId), eq(pageFollowers.userId, userId)))
     .limit(1);
-  return !!row;
+  return row;
 }
 
-export async function followOrgPage(pageId: number, userId: number): Promise<void> {
+export async function isPageFollower(pageId: number, userId: number): Promise<boolean> {
+  return (await getPageFollowRecord(pageId, userId))?.status === "approved";
+}
+
+export async function followOrgPage(pageId: number, userId: number, approvalRequired = false): Promise<"approved" | "pending"> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const existing = await getPageFollowRecord(pageId, userId);
+  if (existing) return existing.status === "approved" ? "approved" : "pending";
+  const status = approvalRequired ? "pending" : "approved";
+  await db.insert(pageFollowers).values({ pageId, userId, status });
+  if (status === "approved") {
+    await db.update(orgPages).set({ followerCount: sql`${orgPages.followerCount} + 1` }).where(eq(orgPages.id, pageId));
+  }
+  return status;
+}
+
+export async function reviewPageFollowRequest(pageId: number, userId: number, approve: boolean): Promise<void> {
   const db = await getDb();
   if (!db) return;
-  const already = await isPageFollower(pageId, userId);
-  if (already) return;
-  await db.insert(pageFollowers).values({ pageId, userId });
-  await db.update(orgPages).set({ followerCount: sql`${orgPages.followerCount} + 1` }).where(eq(orgPages.id, pageId));
+  const request = await getPageFollowRecord(pageId, userId);
+  if (!request || request.status !== "pending") return;
+  if (approve) {
+    await db.update(pageFollowers).set({ status: "approved" }).where(eq(pageFollowers.id, request.id));
+    await db.update(orgPages).set({ followerCount: sql`${orgPages.followerCount} + 1` }).where(eq(orgPages.id, pageId));
+  } else {
+    await db.delete(pageFollowers).where(eq(pageFollowers.id, request.id));
+  }
+}
+
+export async function getPendingPageFollowRequests(pageId: number): Promise<PageFollower[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(pageFollowers).where(and(eq(pageFollowers.pageId, pageId), eq(pageFollowers.status, "pending"))).orderBy(asc(pageFollowers.createdAt));
 }
 
 export async function unfollowOrgPage(pageId: number, userId: number): Promise<void> {
   const db = await getDb();
   if (!db) return;
-  const already = await isPageFollower(pageId, userId);
-  if (!already) return;
-  await db.delete(pageFollowers).where(and(eq(pageFollowers.pageId, pageId), eq(pageFollowers.userId, userId)));
-  await db.update(orgPages).set({ followerCount: sql`GREATEST(${orgPages.followerCount} - 1, 0)` }).where(eq(orgPages.id, pageId));
+  const existing = await getPageFollowRecord(pageId, userId);
+  if (!existing) return;
+  await db.delete(pageFollowers).where(eq(pageFollowers.id, existing.id));
+  if (existing.status === "approved") {
+    await db.update(orgPages).set({ followerCount: sql`GREATEST(${orgPages.followerCount} - 1, 0)` }).where(eq(orgPages.id, pageId));
+  }
 }
 
 export async function isPageAdmin(pageId: number, userId: number): Promise<boolean> {
@@ -2911,7 +2970,7 @@ export async function getFollowedPageIds(userId: number): Promise<number[]> {
   const db = await getDb();
   if (!db) return [];
   const rows = await db.select({ pageId: pageFollowers.pageId })
-    .from(pageFollowers).where(eq(pageFollowers.userId, userId));
+    .from(pageFollowers).where(and(eq(pageFollowers.userId, userId), eq(pageFollowers.status, "approved")));
   return rows.map(r => r.pageId);
 }
 
@@ -2923,7 +2982,7 @@ export async function getOwnedPages(userId: number): Promise<OrgPage[]> {
 
 export async function updateOrgPage(id: number, data: Partial<{
   name: string; description: string | null; category: string | null; logo: string | null;
-  coverPhoto: string | null; website: string | null; location: string | null;
+  coverPhoto: string | null; website: string | null; location: string | null; visibility: "public" | "private";
 }>): Promise<void> {
   const db = await getDb();
   if (!db) return;
@@ -3122,45 +3181,79 @@ export async function listPublicGroups(search?: string, limit = 24, offset = 0):
   if (!db) return [];
   if (search) {
     return db.select().from(publicGroups)
-      .where(sql`LOWER(${publicGroups.name}) LIKE ${`%${search.toLowerCase()}%`} OR LOWER(${publicGroups.description}) LIKE ${`%${search.toLowerCase()}%`} OR LOWER(${publicGroups.category}) LIKE ${`%${search.toLowerCase()}%`}`)
+      .where(and(eq(publicGroups.visibility, "public"), sql`LOWER(${publicGroups.name}) LIKE ${`%${search.toLowerCase()}%`} OR LOWER(${publicGroups.description}) LIKE ${`%${search.toLowerCase()}%`} OR LOWER(${publicGroups.category}) LIKE ${`%${search.toLowerCase()}%`}`))
       .orderBy(desc(publicGroups.memberCount))
       .limit(limit).offset(offset);
   }
-  return db.select().from(publicGroups).orderBy(desc(publicGroups.memberCount)).limit(limit).offset(offset);
+  return db.select().from(publicGroups).where(eq(publicGroups.visibility, "public")).orderBy(desc(publicGroups.memberCount)).limit(limit).offset(offset);
 }
 
-export async function updatePublicGroup(id: number, data: Partial<Pick<PublicGroup, "name" | "description" | "category" | "coverPhoto">>): Promise<void> {
+export async function updatePublicGroup(id: number, data: Partial<Pick<PublicGroup, "name" | "description" | "category" | "coverPhoto" | "visibility">>): Promise<void> {
   const db = await getDb();
   if (!db) return;
   await db.update(publicGroups).set({ ...data, updatedAt: new Date() }).where(eq(publicGroups.id, id));
 }
 
-export async function joinPublicGroup(groupId: number, userId: number, role: "admin" | "moderator" | "member" = "member"): Promise<void> {
+export async function getPublicGroupMembershipRecord(groupId: number, userId: number): Promise<PublicGroupMember | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const [record] = await db.select().from(publicGroupMembers)
+    .where(and(eq(publicGroupMembers.groupId, groupId), eq(publicGroupMembers.userId, userId))).limit(1);
+  return record;
+}
+
+export async function joinPublicGroup(groupId: number, userId: number, role: "admin" | "moderator" | "member" = "member", approvalRequired = false): Promise<"approved" | "pending"> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const existing = await getPublicGroupMembershipRecord(groupId, userId);
+  if (existing) return existing.status === "approved" ? "approved" : "pending";
+  const status = role === "admin" || approvalRequired === false ? "approved" : "pending";
+  await db.insert(publicGroupMembers).values({ groupId, userId, role, status });
+  if (status === "approved") {
+    await db.update(publicGroups).set({ memberCount: sql`${publicGroups.memberCount} + 1` }).where(eq(publicGroups.id, groupId));
+  }
+  return status;
+}
+
+export async function reviewPublicGroupJoinRequest(groupId: number, userId: number, approve: boolean): Promise<void> {
   const db = await getDb();
   if (!db) return;
-  await db.insert(publicGroupMembers).values({ groupId, userId, role }).onConflictDoNothing();
-  await db.update(publicGroups).set({ memberCount: sql`${publicGroups.memberCount} + 1` }).where(eq(publicGroups.id, groupId));
+  const request = await getPublicGroupMembershipRecord(groupId, userId);
+  if (!request || request.status !== "pending") return;
+  if (approve) {
+    await db.update(publicGroupMembers).set({ status: "approved" }).where(eq(publicGroupMembers.id, request.id));
+    await db.update(publicGroups).set({ memberCount: sql`${publicGroups.memberCount} + 1` }).where(eq(publicGroups.id, groupId));
+  } else {
+    await db.delete(publicGroupMembers).where(eq(publicGroupMembers.id, request.id));
+  }
+}
+
+export async function getPendingPublicGroupJoinRequests(groupId: number): Promise<PublicGroupMember[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(publicGroupMembers).where(and(eq(publicGroupMembers.groupId, groupId), eq(publicGroupMembers.status, "pending"))).orderBy(asc(publicGroupMembers.joinedAt));
 }
 
 export async function leavePublicGroup(groupId: number, userId: number): Promise<void> {
   const db = await getDb();
   if (!db) return;
-  await db.delete(publicGroupMembers).where(and(eq(publicGroupMembers.groupId, groupId), eq(publicGroupMembers.userId, userId)));
-  await db.update(publicGroups).set({ memberCount: sql`GREATEST(${publicGroups.memberCount} - 1, 0)` }).where(eq(publicGroups.id, groupId));
+  const existing = await getPublicGroupMembershipRecord(groupId, userId);
+  if (!existing) return;
+  await db.delete(publicGroupMembers).where(eq(publicGroupMembers.id, existing.id));
+  if (existing.status === "approved") {
+    await db.update(publicGroups).set({ memberCount: sql`GREATEST(${publicGroups.memberCount} - 1, 0)` }).where(eq(publicGroups.id, groupId));
+  }
 }
 
 export async function getPublicGroupMembership(groupId: number, userId: number): Promise<PublicGroupMember | undefined> {
-  const db = await getDb();
-  if (!db) return undefined;
-  const result = await db.select().from(publicGroupMembers)
-    .where(and(eq(publicGroupMembers.groupId, groupId), eq(publicGroupMembers.userId, userId))).limit(1);
-  return result[0];
+  const membership = await getPublicGroupMembershipRecord(groupId, userId);
+  return membership?.status === "approved" ? membership : undefined;
 }
 
 export async function getPublicGroupMembers(groupId: number, limit = 50): Promise<PublicGroupMember[]> {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(publicGroupMembers).where(eq(publicGroupMembers.groupId, groupId)).limit(limit);
+  return db.select().from(publicGroupMembers).where(and(eq(publicGroupMembers.groupId, groupId), eq(publicGroupMembers.status, "approved"))).limit(limit);
 }
 
 export async function setPublicGroupMemberRole(groupId: number, userId: number, role: "admin" | "moderator" | "member"): Promise<void> {

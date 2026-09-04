@@ -515,6 +515,7 @@ export const orgPages = pgTable("org_pages", {
   website: varchar("website", { length: 255 }),
   location: varchar("location", { length: 100 }),
   ownerId: integer("ownerId").notNull(), // user who created the page
+  visibility: varchar("visibility", { length: 10 }).default("public").notNull(),
   followerCount: integer("followerCount").default(0).notNull(),
   isVerified: boolean("isVerified").default(false).notNull(),
   isSuspended: boolean("isSuspended").default(false).notNull(),
@@ -531,6 +532,7 @@ export const pageFollowers = pgTable("page_followers", {
   id: serial("id").primaryKey(),
   pageId: integer("pageId").notNull(),
   userId: integer("userId").notNull(),
+  status: varchar("status", { length: 12 }).default("approved").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type PageFollower = typeof pageFollowers.$inferSelect;
@@ -607,6 +609,7 @@ export const publicGroups = pgTable("public_groups", {
   category: varchar("category", { length: 80 }),
   coverPhoto: varchar("coverPhoto", { length: 512 }),
   createdBy: integer("createdBy").notNull(),
+  visibility: varchar("visibility", { length: 10 }).default("public").notNull(),
   isSuspended: boolean("isSuspended").default(false).notNull(),
   suspendedAt: timestamp("suspendedAt"),
   suspendedByAdminId: integer("suspendedByAdminId"),
@@ -623,6 +626,7 @@ export const publicGroupMembers = pgTable("public_group_members", {
   groupId: integer("groupId").notNull(),
   userId: integer("userId").notNull(),
   role: public_group_members_role_enum("role").default("member").notNull(),
+  status: varchar("status", { length: 12 }).default("approved").notNull(),
   joinedAt: timestamp("joinedAt").defaultNow().notNull(),
 });
 export type PublicGroupMember = typeof publicGroupMembers.$inferSelect;
