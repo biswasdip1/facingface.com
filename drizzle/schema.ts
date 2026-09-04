@@ -89,6 +89,9 @@ export const posts = pgTable("posts", {
   linkDescription: text("linkDescription"),
   linkImage: text("linkImage"),
   linkSiteName: varchar("linkSiteName", { length: 100 }),
+  // A dedicated Page marker keeps Page content out of the personal Feed without
+  // sacrificing link preview metadata such as a publisher name.
+  pageId: integer("pageId"),
   docUrl: text("docUrl"),
   docName: varchar("docName", { length: 255 }),
   docSize: integer("docSize"),
@@ -657,6 +660,19 @@ export const publicGroupPosts = pgTable("public_group_posts", {
 });
 export type PublicGroupPost = typeof publicGroupPosts.$inferSelect;
 export type InsertPublicGroupPost = typeof publicGroupPosts.$inferInsert;
+
+// Public Group posts have their own identifiers, so comments are kept in a
+// dedicated table instead of reusing ordinary post comments and risking ID clashes.
+export const publicGroupPostComments = pgTable("public_group_post_comments", {
+  id: serial("id").primaryKey(),
+  postId: integer("postId").notNull(),
+  authorId: integer("authorId").notNull(),
+  text: text("text").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type PublicGroupPostComment = typeof publicGroupPostComments.$inferSelect;
+export type InsertPublicGroupPostComment = typeof publicGroupPostComments.$inferInsert;
 
 // ─── Stories ─────────────────────────────────────────────────────────────────
 export const stories = pgTable("stories", {

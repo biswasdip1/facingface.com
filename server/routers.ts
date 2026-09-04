@@ -207,6 +207,11 @@ import {
   createPublicGroupPost,
   getPublicGroupPosts,
   deletePublicGroupPost,
+  getPublicGroupPostById,
+  getPublicGroupPostComments,
+  getPublicGroupPostCommentCounts,
+  createPublicGroupPostComment,
+  deletePublicGroupPostComment,
   uploadPublicGroupCover,
   createOrgPagePost,
   getOrgPagePosts,
@@ -1557,7 +1562,7 @@ const reactionsRouter = router({
     .input(
       z.object({
         targetId: z.number().int(),
-        targetType: z.enum(["post", "comment"]),
+        targetType: z.enum(["post", "comment", "page_post", "public_group_post"]),
         emoji: z.string().min(1).max(10),
       })
     )
@@ -1578,7 +1583,7 @@ const reactionsRouter = router({
     }),
 
   getCounts: protectedProcedure
-    .input(z.object({ targetId: z.number().int(), targetType: z.enum(["post", "comment"]) }))
+    .input(z.object({ targetId: z.number().int(), targetType: z.enum(["post", "comment", "page_post", "public_group_post"]) }))
     .query(async ({ ctx, input }) => {
       const counts = await getEmojiReactionCounts(input.targetId, input.targetType);
       const myReactions = await getUserEmojiReactions(ctx.user.id, input.targetId, input.targetType);
@@ -1589,7 +1594,7 @@ const reactionsRouter = router({
     .input(
       z.object({
         targetIds: z.array(z.number().int()),
-        targetType: z.enum(["post", "comment"]),
+        targetType: z.enum(["post", "comment", "page_post", "public_group_post"]),
       })
     )
     .query(async ({ ctx, input }) => {
@@ -2972,9 +2977,14 @@ const pagesRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "Post must have text, media, or a document" });
       }
 
-      // Page posts are deliberately kept out of the personal Feed. The page:<id>
-      // marker is used by getPagePostsByPageId, so do not overwrite it with a
-      // fetched link-preview site name.
+      // Page posts remain out of the personal Feed through the dedicated pageId
+      // field, so they can safely retain the same URL preview metadata as a
+      // standard post.
+      let linkPreview = null;
+      if (input.text) {
+        const foundUrl = extractFirstUrl(input.text);
+        if (foundUrl) linkPreview = await fetchLinkPreview(foundUrl);
+      }
 
       // Auto-generate video poster at 1s if mediaType=video and no custom poster was provided
       let resolvedPosterUrl: string | null = input.videoPosterUrl ?? null;
@@ -3006,11 +3016,12 @@ const pagesRouter = router({
         mediaUrl: input.mediaUrl ?? null,
         mediaType: input.mediaType ?? null,
         isFlagged: false,
-        linkUrl: null,
-        linkTitle: null,
-        linkDescription: null,
-        linkImage: null,
-        linkSiteName: `page:${page.id}`,
+        pageId: page.id,
+        linkUrl: linkPreview?.url ?? null,
+        linkTitle: linkPreview?.title ?? null,
+        linkDescription: linkPreview?.description ?? null,
+        linkImage: linkPreview?.image ?? null,
+        linkSiteName: linkPreview?.siteName ?? null,
         docUrl: input.docUrl ?? null,
         docName: input.docName ?? null,
         docSize: input.docSize ?? null,
@@ -3240,7 +3251,8 @@ const publicGroupsRouter = router({
       handle: z.string(),
       content: postTextSchema.optional(),
       mediaUrl: z.string().optional(),
-      mediaType: z.enum(["photo", "video"]).optional(),
+      // The shared composer emits image; legacy Group rows store the equivalent photo value.
+      mediaType: z.enum(["image", "photo", "video"]).optional(),
       photo2Url: z.string().optional(),
       photo3Url: z.string().optional(),
       photo1Caption: z.string().max(300).optional(),
@@ -3269,8 +3281,13 @@ const publicGroupsRouter = router({
       const membership = await getPublicGroupMembership(group.id, ctx.user!.id);
       if (!membership) throw new TRPCError({ code: "FORBIDDEN", message: "Join the group to post." });
 
-      // Public Group posts remain in their own group timeline. Do not fetch or
-      // attach external link-preview records in this context.
+      // Public Group posts remain in their own group timeline, while retaining
+      // their own safe URL-preview metadata for display in that group only.
+      let linkPreview = null;
+      if (input.content) {
+        const foundUrl = extractFirstUrl(input.content);
+        if (foundUrl) linkPreview = await fetchLinkPreview(foundUrl);
+      }
 
       // Auto-generate video poster at 1s if mediaType=video and no custom poster was provided
       let resolvedPosterUrl: string | null = input.videoPosterUrl ?? null;
@@ -3317,7 +3334,7 @@ const publicGroupsRouter = router({
         authorId: ctx.user!.id,
         content: input.content ?? null,
         mediaUrl: input.mediaUrl ?? null,
-        mediaType: input.mediaType ?? null,
+        mediaType: input.mediaType === "image" ? "photo" : (input.mediaType ?? null),
         photo2Url: input.photo2Url ?? null,
         photo3Url: input.photo3Url ?? null,
         photo1Caption: input.photo1Caption ?? null,
@@ -3334,11 +3351,11 @@ const publicGroupsRouter = router({
         docSize: input.docSize ?? null,
         docType: input.docType ?? null,
         bgColor: input.bgColor ?? null,
-        linkUrl: null,
-        linkTitle: null,
-        linkDescription: null,
-        linkImage: null,
-        linkSiteName: null,
+        linkUrl: linkPreview?.url ?? null,
+        linkTitle: linkPreview?.title ?? null,
+        linkDescription: linkPreview?.description ?? null,
+        linkImage: linkPreview?.image ?? null,
+        linkSiteName: linkPreview?.siteName ?? null,
       });
 
       // Save hashtags
@@ -3370,13 +3387,54 @@ const publicGroupsRouter = router({
       const group = await getPublicGroupByHandle(input.handle);
       if (!group) return { posts: [], authors: {} };
       const posts = await getPublicGroupPosts(group.id, input.limit, input.offset);
+      const commentCounts = await getPublicGroupPostCommentCounts(posts.map((post) => post.id));
       const authorIds = Array.from(new Set(posts.map(p => p.authorId)));
       const authorList = await Promise.all(authorIds.map(id => getUserById(id)));
       const authors: Record<number, { id: number; name: string | null; avatar: string | null; isVerified: boolean }> = {};
       for (const a of authorList) {
         if (a) authors[a.id] = { id: a.id, name: a.name, avatar: a.avatar ?? null, isVerified: a.isVerified ?? false };
       }
-      return { posts, authors };
+      return { posts, authors, commentCounts };
+    }),
+
+  getComments: publicProcedure
+    .input(z.object({ handle: z.string(), postId: z.number().int(), limit: z.number().int().min(1).max(100).default(50) }))
+    .query(async ({ input }) => {
+      const group = await getPublicGroupByHandle(input.handle);
+      if (!group) throw new TRPCError({ code: "NOT_FOUND" });
+      const post = await getPublicGroupPostById(input.postId);
+      if (!post || post.groupId !== group.id) throw new TRPCError({ code: "NOT_FOUND" });
+      const comments = await getPublicGroupPostComments(post.id, input.limit);
+      const authors: Record<number, { id: number; name: string | null; avatar: string | null; isVerified: boolean }> = {};
+      for (const authorId of Array.from(new Set(comments.map((comment) => comment.authorId)))) {
+        const author = await getUserById(authorId);
+        if (author) authors[author.id] = { id: author.id, name: author.name, avatar: author.avatar ?? null, isVerified: author.isVerified ?? false };
+      }
+      return { comments, authors };
+    }),
+
+  addComment: protectedProcedure
+    .input(z.object({ handle: z.string(), postId: z.number().int(), text: z.string().trim().min(1).max(2000) }))
+    .mutation(async ({ input, ctx }) => {
+      const group = await getPublicGroupByHandle(input.handle);
+      if (!group) throw new TRPCError({ code: "NOT_FOUND" });
+      const membership = await getPublicGroupMembership(group.id, ctx.user.id);
+      if (!membership) throw new TRPCError({ code: "FORBIDDEN", message: "Join the group to comment." });
+      const post = await getPublicGroupPostById(input.postId);
+      if (!post || post.groupId !== group.id) throw new TRPCError({ code: "NOT_FOUND" });
+      const commentId = await createPublicGroupPostComment(post.id, ctx.user.id, input.text);
+      return { commentId };
+    }),
+
+  deleteComment: protectedProcedure
+    .input(z.object({ handle: z.string(), commentId: z.number().int() }))
+    .mutation(async ({ input, ctx }) => {
+      const group = await getPublicGroupByHandle(input.handle);
+      if (!group) throw new TRPCError({ code: "NOT_FOUND" });
+      const membership = await getPublicGroupMembership(group.id, ctx.user.id);
+      if (!membership) throw new TRPCError({ code: "FORBIDDEN" });
+      await deletePublicGroupPostComment(input.commentId, ctx.user.id);
+      return { success: true };
     }),
 
   deletePost: protectedProcedure

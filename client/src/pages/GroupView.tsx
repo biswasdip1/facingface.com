@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import CreatePost from "@/components/CreatePost";
 import InviteModal from "@/components/InviteModal";
+import GroupPostCardStandard from "@/components/GroupPostCard";
 import { formatDistanceToNow } from "date-fns";
 
 // ─── Minimal group post card ──────────────────────────────────────────────────
@@ -284,6 +285,7 @@ export default function GroupView() {
 
   const posts = postsData?.posts ?? [];
   const authors = postsData?.authors ?? {};
+  const commentCounts: Record<number, number> = postsData?.commentCounts ?? {};
   const isAdmin = group.isAdmin;
   const isMember = group.isMember;
   const isSuspended = !!(group as { isSuspended?: boolean }).isSuspended;
@@ -459,11 +461,13 @@ export default function GroupView() {
             </div>
           ) : (
             posts.map((post) => (
-              <GroupPostCard
+              <GroupPostCardStandard
                 key={post.id}
+                groupHandle={handle}
                 post={post}
                 author={authors[post.authorId]}
-                isAdmin={isAdmin}
+                canModerate={isAdmin || user?.id === post.authorId}
+                initialCommentCount={commentCounts[post.id] ?? 0}
                 onDelete={() => deletePostMutation.mutate({ handle, postId: post.id })}
               />
             ))

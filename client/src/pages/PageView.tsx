@@ -358,26 +358,23 @@ export default function PageView() {
             </div>
           ) : (
             posts.map((post) => (
-              <div key={post.id} className="bg-card border border-border rounded-xl p-4">
-                <div className="flex items-center gap-3 mb-3">
-                  <Avatar className="w-9 h-9">
-                    <AvatarImage src={page.logo ?? undefined} />
-                    <AvatarFallback className="bg-red-600 text-white font-bold">
-                      {page.name.charAt(0).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">{page.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {new Date(post.createdAt).toLocaleDateString()}
-                    </p>
-                  </div>
-                </div>
-                {post.text && <p className="text-sm text-foreground whitespace-pre-wrap">{post.text}</p>}
-                {post.mediaUrl && post.mediaType === "image" && (
-                  <img src={post.mediaUrl} alt="" className="mt-3 rounded-lg w-full object-cover max-h-80" />
-                )}
-              </div>
+              <PostCard
+                key={post.id}
+                post={post}
+                author={{
+                  // Page posts keep the publishing account for permissions while
+                  // presenting the Page identity consistently in its own timeline.
+                  id: post.authorId,
+                  name: page.name,
+                  avatar: page.logo ?? null,
+                  isVerified: false,
+                }}
+                // The standard card fetches its own durable emoji reactions and
+                // comments. Legacy Page rows do not include denormalised counts.
+                likeCount={0}
+                commentCount={0}
+                isLiked={false}
+              />
             ))
           )}
         </div>

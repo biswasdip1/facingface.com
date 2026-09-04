@@ -461,12 +461,12 @@ function TextWithLinks({ text }: { text: string }) {
 
 const QUICK_EMOJIS = ["❤️", "😂", "😮", "😢", "😡", "👍"];
 
-interface ReactionBarProps {
+export interface ReactionBarProps {
   targetId: number;
-  targetType: "post" | "comment";
+  targetType: "post" | "comment" | "page_post" | "public_group_post";
 }
 
-function ReactionBar({ targetId, targetType }: ReactionBarProps) {
+export function ReactionBar({ targetId, targetType }: ReactionBarProps) {
   const { themeMode } = useThemeMode();
   const emojiTheme = themeMode === "lightdark" ? "dark" : "light";
   const utils = trpc.useUtils();

@@ -1,6 +1,6 @@
 import { orgPagePosts, OrgPagePost, InsertOrgPagePost, commentReactions } from "./../drizzle/schema";
 import { countEffectiveReactions, mergePostReactors, type DurablePostReactor } from "./reactionConsistency";
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, ne, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -80,6 +80,8 @@ import {
   publicGroupPosts,
   PublicGroupPost,
   InsertPublicGroupPost,
+  publicGroupPostComments,
+  PublicGroupPostComment,
   stories,
   Story,
   InsertStory,
@@ -330,6 +332,40 @@ export async function ensureLegacyRuntimeSchema(): Promise<void> {
       if (!postReactionIndexes.has("post_reactions_post_user_unique")) {
         await db.execute(sql`CREATE UNIQUE INDEX "post_reactions_post_user_unique" ON "post_reactions" ("postId", "userId")`);
       }
+    }
+
+    // New Page posts use a dedicated pageId. Older Page records retain their
+    // original page:<id> marker, so both generations remain visible and stay
+    // outside ordinary personal-feed queries.
+    if (await relationExists("posts")) {
+      const postColumns = await existingColumns("posts");
+      if (!postColumns.has("pageId")) {
+        await db.execute(sql`ALTER TABLE "posts" ADD COLUMN "pageId" integer`);
+      }
+      const postIndexes = await existingIndexNames("posts");
+      if (!postIndexes.has("posts_pageId_idx")) {
+        await db.execute(sql`CREATE INDEX "posts_pageId_idx" ON "posts" ("pageId")`);
+      }
+    }
+
+    // Group-post identifiers are independent of normal post identifiers, so
+    // standard Group discussions use their own comment storage. Create it only
+    // when absent; this does not rewrite any existing Group post data.
+    if (!(await relationExists("public_group_post_comments"))) {
+      await db.execute(sql`
+        CREATE TABLE "public_group_post_comments" (
+          "id" serial PRIMARY KEY NOT NULL,
+          "postId" integer NOT NULL,
+          "authorId" integer NOT NULL,
+          "text" text NOT NULL,
+          "createdAt" timestamp DEFAULT now() NOT NULL,
+          "updatedAt" timestamp DEFAULT now() NOT NULL
+        )
+      `);
+    }
+    const groupCommentIndexes = await existingIndexNames("public_group_post_comments");
+    if (!groupCommentIndexes.has("public_group_post_comments_postId_idx")) {
+      await db.execute(sql`CREATE INDEX "public_group_post_comments_postId_idx" ON "public_group_post_comments" ("postId", "createdAt")`);
     }
 
     if (await relationExists("reel_likes")) {
@@ -625,10 +661,11 @@ export async function getBlockedUserIds(userId: number): Promise<number[]> {
 export async function getFeedPosts(limit = 20, offset = 0, excludeUserIds: number[] = []): Promise<Post[]> {
   const db = await getDb();
   if (!db) return [];
-  // Page posts remain regular posts so existing comments and reactions still
-  // work, but the page:<id> marker keeps them out of the personal Feed.
+  // Page posts remain regular posts so standard comments and reactions work,
+  // but pageId (or the older page:<id> marker) keeps them out of the personal Feed.
   const baseWhere = and(
     eq(posts.isFlagged, false),
+    isNull(posts.pageId),
     sql`(${posts.linkSiteName} IS NULL OR ${posts.linkSiteName} NOT LIKE 'page:%')`,
   );
   const where = excludeUserIds.length > 0
@@ -1061,10 +1098,12 @@ export async function updateViewerCount(streamId: number, delta: number): Promis
 
 import { emojiReactions, postShares, EmojiReaction, InsertEmojiReaction } from "../drizzle/schema";
 
+export type EmojiReactionTarget = "post" | "comment" | "page_post" | "public_group_post";
+
 export async function getEmojiReaction(
   userId: number,
   targetId: number,
-  targetType: "post" | "comment",
+  targetType: EmojiReactionTarget,
   emoji: string
 ): Promise<EmojiReaction | undefined> {
   const db = await getDb();
@@ -1093,7 +1132,7 @@ export async function addEmojiReaction(data: InsertEmojiReaction): Promise<void>
 export async function removeEmojiReaction(
   userId: number,
   targetId: number,
-  targetType: "post" | "comment",
+  targetType: EmojiReactionTarget,
   emoji: string
 ): Promise<void> {
   const db = await getDb();
@@ -1113,7 +1152,7 @@ export async function removeEmojiReaction(
 /** Returns { emoji -> count } for a target, plus the current user's reacted emojis */
 export async function getEmojiReactionCounts(
   targetId: number,
-  targetType: "post" | "comment"
+  targetType: EmojiReactionTarget
 ): Promise<Record<string, number>> {
   const db = await getDb();
   if (!db) return {};
@@ -1132,7 +1171,7 @@ export async function getEmojiReactionCounts(
 export async function getUserEmojiReactions(
   userId: number,
   targetId: number,
-  targetType: "post" | "comment"
+  targetType: EmojiReactionTarget
 ): Promise<string[]> {
   const db = await getDb();
   if (!db) return [];
@@ -1152,7 +1191,7 @@ export async function getUserEmojiReactions(
 // Batch version for feed
 export async function getEmojiReactionCountsBatch(
   targetIds: number[],
-  targetType: "post" | "comment"
+  targetType: EmojiReactionTarget
 ): Promise<Record<number, Record<string, number>>> {
   const db = await getDb();
   if (!db || targetIds.length === 0) return {};
@@ -1178,7 +1217,7 @@ export async function getEmojiReactionCountsBatch(
 export async function getUserEmojiReactionsBatch(
   userId: number,
   targetIds: number[],
-  targetType: "post" | "comment"
+  targetType: EmojiReactionTarget
 ): Promise<Record<number, string[]>> {
   const db = await getDb();
   if (!db || targetIds.length === 0) return {};
@@ -2695,17 +2734,12 @@ export async function updateOrgPage(id: number, data: Partial<{
 export async function getPagePostsByPageId(pageId: number, limit = 20, offset = 0): Promise<Post[]> {
   const db = await getDb();
   if (!db) return [];
-  // Page posts are regular posts where authorId is stored as negative pageId (convention: -pageId)
-  // Instead, we use a dedicated pageId column approach: posts with pageId set
-  // For simplicity, page posts are posts where authorId = ownerId AND post has pageId tag
-  // We use the posts table with a special convention: pageId stored in the resharedFromId field
-  // Better: use a separate approach - store page posts as posts with authorId = ownerId
-  // and filter by a page-specific marker. Since we don't have a pageId column on posts,
-  // we'll use the linkSiteName field as a page marker: "page:{pageId}"
+  // New Page posts use the dedicated pageId marker. Older records used the
+  // page:<id> link-site marker, which remains supported for safe compatibility.
   return db.select().from(posts)
     .where(and(
       eq(posts.isFlagged, false),
-      eq(posts.linkSiteName, `page:${pageId}`)
+      or(eq(posts.pageId, pageId), eq(posts.linkSiteName, `page:${pageId}`))
     ))
     .orderBy(desc(posts.createdAt))
     .limit(limit).offset(offset);
@@ -2718,7 +2752,7 @@ export async function getPageFeedPosts(followedPageIds: number[], limit = 20, of
   return db.select().from(posts)
     .where(and(
       eq(posts.isFlagged, false),
-      inArray(posts.linkSiteName, markers)
+      or(inArray(posts.pageId, followedPageIds), inArray(posts.linkSiteName, markers))
     ))
     .orderBy(desc(posts.createdAt))
     .limit(limit).offset(offset);
@@ -2935,6 +2969,48 @@ export async function deletePublicGroupPost(id: number, authorId: number): Promi
   const db = await getDb();
   if (!db) return;
   await db.delete(publicGroupPosts).where(and(eq(publicGroupPosts.id, id), eq(publicGroupPosts.authorId, authorId)));
+}
+
+export async function getPublicGroupPostById(id: number): Promise<PublicGroupPost | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const [post] = await db.select().from(publicGroupPosts).where(eq(publicGroupPosts.id, id)).limit(1);
+  return post;
+}
+
+export async function getPublicGroupPostComments(postId: number, limit = 50): Promise<PublicGroupPostComment[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(publicGroupPostComments)
+    .where(eq(publicGroupPostComments.postId, postId))
+    .orderBy(asc(publicGroupPostComments.createdAt))
+    .limit(limit);
+}
+
+export async function getPublicGroupPostCommentCounts(postIds: number[]): Promise<Record<number, number>> {
+  const db = await getDb();
+  if (!db || postIds.length === 0) return {};
+  const rows = await db.select({ postId: publicGroupPostComments.postId, count: sql<number>`count(*)` })
+    .from(publicGroupPostComments)
+    .where(inArray(publicGroupPostComments.postId, postIds))
+    .groupBy(publicGroupPostComments.postId);
+  return Object.fromEntries(rows.map((row) => [row.postId, Number(row.count)]));
+}
+
+export async function createPublicGroupPostComment(postId: number, authorId: number, text: string): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const [comment] = await db.insert(publicGroupPostComments)
+    .values({ postId, authorId, text })
+    .returning({ id: publicGroupPostComments.id });
+  return comment.id;
+}
+
+export async function deletePublicGroupPostComment(id: number, authorId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(publicGroupPostComments)
+    .where(and(eq(publicGroupPostComments.id, id), eq(publicGroupPostComments.authorId, authorId)));
 }
 
 export async function uploadPublicGroupCover(groupId: number, coverPhoto: string): Promise<void> {
@@ -3643,7 +3719,7 @@ export async function setMediaLimit(key: string, value: number, adminId: number)
 // ─── Content Reports ──────────────────────────────────────────────────────────
 export async function createContentReport(data: {
   reporterId: number;
-  targetType: "post" | "comment" | "listing";
+  targetType: EmojiReactionTarget | "listing";
   targetId: number;
   reason: string;
 }): Promise<number> {

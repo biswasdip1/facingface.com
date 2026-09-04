@@ -270,12 +270,12 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
     staleTime: 30_000,
   });
 
-  // Page and Public Group posts stay within their own context. Do not fetch or
-  // display external URL preview cards there; previews remain a main-feed feature.
+  // Page and Public Group posts remain isolated in their own timelines, but use
+  // the same safe URL preview service as standard Feed posts.
   const isContextPost = Boolean(pageHandle || groupHandle);
   const { data: previewData, isFetching: previewLoading } = trpc.linkPreview.fetch.useQuery(
     { url: previewUrl! },
-    { enabled: !isContextPost && !!previewUrl && !previewDismissed && !showPoll }
+    { enabled: !!previewUrl && !previewDismissed && !showPoll }
   );
   const preview = previewData?.preview;
 
@@ -800,7 +800,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
   const isLoading = uploading || createPost.isPending || createPagePost.isPending || createGroupPost.isPending;
 
 
-  const showPreviewCard = !isContextPost && !previewDismissed && !showPoll && previewUrl && (previewLoading || preview);
+  const showPreviewCard = !previewDismissed && !showPoll && previewUrl && (previewLoading || preview);
 
   // Dynamic text styles
   const fontSize = getDynamicFontSize(text);
