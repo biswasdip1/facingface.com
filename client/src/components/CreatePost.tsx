@@ -44,7 +44,7 @@ function ComposerAvatar({ src, name, size = 10 }: { src?: string | null; name?: 
 }
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Image, Video, X, Loader2, Link2, BarChart2, Plus, Trash2, Smile, Radio, FileText, Music, Film, Globe2, Lock } from "lucide-react";
+import { Image, Video, X, Loader2, Link2, BarChart2, Plus, Trash2, Smile, Radio, FileText, Music, Film } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { toast } from "sonner";
 import Picker from "@emoji-mart/react";
@@ -962,26 +962,15 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
               </div>
             </div>
             {!isContextPost && (
-              <div className="flex items-center rounded-lg border border-border bg-muted/40 p-0.5" role="radiogroup" aria-label="Post audience">
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={audience === "public"}
-                  onClick={() => setAudience("public")}
-                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${audience === "public" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  <Globe2 size={14} /> Public
-                </button>
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={audience === "private"}
-                  onClick={() => setAudience("private")}
-                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${audience === "private" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  <Lock size={14} /> Private
-                </button>
-              </div>
+              <select
+                aria-label="Post audience"
+                value={audience}
+                onChange={(event) => setAudience(event.target.value as "public" | "private")}
+                className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-semibold text-foreground outline-none transition-colors hover:border-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="public">Public</option>
+                <option value="private">Private</option>
+              </select>
             )}
           </div>
 
