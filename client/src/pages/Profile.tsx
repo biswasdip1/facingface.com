@@ -3,7 +3,7 @@ import { trpc } from "@/lib/trpc";
 import { startRegistration, startAuthentication, browserSupportsWebAuthn } from "@simplewebauthn/browser";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useParams } from "wouter";
-import { Loader2, Edit2, Camera, X, Check, UserPlus, UserCheck, Clock, MessageCircle, Fingerprint, Plus, Star, Trash2, Images, BadgeCheck, Bookmark, Play, ShieldOff, Shield, Menu, Share2 } from "lucide-react";
+import { Loader2, Edit2, Camera, X, Check, UserPlus, UserCheck, Clock, MessageCircle, Fingerprint, Plus, Star, Trash2, Images, BadgeCheck, Bookmark, Play, ShieldOff, Shield, Menu, Share2, Gift } from "lucide-react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import PostCard from "@/components/PostCard";
@@ -142,6 +142,9 @@ export default function Profile() {
   const [editBirthDay, setEditBirthDay] = useState("");
   const [editBirthMonth, setEditBirthMonth] = useState("");
   const [editHobby, setEditHobby] = useState("");
+  const [birthdayDialogOpen, setBirthdayDialogOpen] = useState(false);
+  const [birthdayDialogDay, setBirthdayDialogDay] = useState("");
+  const [birthdayDialogMonth, setBirthdayDialogMonth] = useState("");
   const [uploading, setUploading] = useState(false);
   const [coverUploading, setCoverUploading] = useState(false);
   const avatarRef = useRef<HTMLInputElement>(null);
@@ -363,7 +366,35 @@ export default function Profile() {
       }
     }
 
-    updateProfile.mutate({ name: editName, bio: editBio, hometown: editHometown || null, currentLocation: editCurrentLocation || null, currentRole: editCurrentRole || null, phone: editPhone || null, website: editWebsite || null, youtubeChannel: editYoutube || null, birthDay, birthMonth, hobby: editHobby || null });
+    // The quick profile-completion path can open this form before its display
+    // fields are preloaded. Never send an empty name: retain the saved name
+    // while allowing birthday-only updates to succeed.
+    const savedName = profileData?.user.name?.trim();
+    updateProfile.mutate({ name: editName.trim() || savedName || undefined, bio: editBio, hometown: editHometown || null, currentLocation: editCurrentLocation || null, currentRole: editCurrentRole || null, phone: editPhone || null, website: editWebsite || null, youtubeChannel: editYoutube || null, birthDay, birthMonth, hobby: editHobby || null });
+  };
+
+  const openBirthdayDialog = () => {
+    setBirthdayDialogDay(profileData?.user.birthDay ? String(profileData.user.birthDay) : "");
+    setBirthdayDialogMonth(profileData?.user.birthMonth ? String(profileData.user.birthMonth) : "");
+    setBirthdayDialogOpen(true);
+  };
+
+  const saveBirthdayFromDialog = async () => {
+    const birthDay = Number(birthdayDialogDay);
+    const birthMonth = Number(birthdayDialogMonth);
+    const maxDaysByMonth = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if (!birthDay || !birthMonth || birthDay < 1 || birthDay > maxDaysByMonth[birthMonth - 1]) {
+      toast.error("Please choose a valid birth day and month.");
+      return;
+    }
+    try {
+      await updateProfile.mutateAsync({ birthDay, birthMonth });
+      await utils.users.getProfile.invalidate({ userId: targetId! });
+      setBirthdayDialogOpen(false);
+      toast.success("Birthday saved to your Biodata.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Birthday could not be saved.");
+    }
   };
 
   if (!targetId) return null;
@@ -393,6 +424,22 @@ export default function Profile() {
 
   return (
     <div className="container py-8">
+      {birthdayDialogOpen && isOwnProfile && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="birthday-dialog-title">
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-full bg-red-50 text-[var(--its-red)]"><Gift size={19} /></span><div><h2 id="birthday-dialog-title" className="text-base font-black text-foreground">Add your birthday</h2><p className="text-xs text-muted-foreground">Choose day and month only.</p></div></div>
+              <button type="button" onClick={() => setBirthdayDialogOpen(false)} className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Close birthday form"><X size={18} /></button>
+            </div>
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <label className="text-xs font-bold text-foreground">Day<select value={birthdayDialogDay} onChange={(event) => setBirthdayDialogDay(event.target.value)} className="mt-1.5 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"><option value="">Select day</option>{Array.from({ length: 31 }, (_, index) => index + 1).map((day) => <option key={day} value={day}>{day}</option>)}</select></label>
+              <label className="text-xs font-bold text-foreground">Month<select value={birthdayDialogMonth} onChange={(event) => setBirthdayDialogMonth(event.target.value)} className="mt-1.5 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"><option value="">Select month</option>{BIRTH_MONTHS.map((month, index) => <option key={month} value={index + 1}>{month}</option>)}</select></label>
+            </div>
+            <p className="mt-4 rounded-md bg-muted/60 p-3 text-xs leading-relaxed text-muted-foreground">For your privacy, FacingFace does not ask for, store, or show your birth year. After saving, this will appear in your Biodata as day and month only.</p>
+            <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setBirthdayDialogOpen(false)} className="rounded-md border border-border px-3 py-2 text-xs font-bold text-foreground hover:bg-muted">Cancel</button><button type="button" onClick={saveBirthdayFromDialog} disabled={updateProfile.isPending} className="rounded-md bg-[var(--its-red)] px-3 py-2 text-xs font-bold text-white hover:opacity-90 disabled:opacity-60">{updateProfile.isPending ? "Saving…" : "Save birthday"}</button></div>
+          </div>
+        </div>
+      )}
       <div className="max-w-2xl mx-auto">
 
         {/* ── Avatar Lightbox ── */}
@@ -964,28 +1011,9 @@ export default function Profile() {
                       className="w-full border-b border-border px-0 py-1 text-sm text-foreground placeholder-gray-400 focus:outline-none bg-transparent"
                     />
                   ))}
-                  <div className="grid grid-cols-[1fr_1.4fr] gap-2 sm:col-span-2">
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min={1}
-                      max={31}
-                      value={editBirthDay}
-                      onChange={(e) => setEditBirthDay(e.target.value)}
-                      placeholder="Birth day"
-                      aria-label="Birth day only; no birth year"
-                      className="w-full border-b border-border px-0 py-1 text-sm text-foreground placeholder-gray-400 focus:outline-none bg-transparent"
-                    />
-                    <select
-                      value={editBirthMonth}
-                      onChange={(e) => setEditBirthMonth(e.target.value)}
-                      className="w-full border-b border-border px-0 py-1 text-sm text-foreground focus:outline-none bg-transparent"
-                    >
-                      <option value="">Birth month</option>
-                      {BIRTH_MONTHS.map((month, index) => (
-                        <option key={month} value={index + 1}>{month}</option>
-                      ))}
-                    </select>
+                  <div className="sm:col-span-2 flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-2">
+                    <div><p className="text-xs font-bold text-foreground">Birthday</p><p className="text-[11px] text-muted-foreground">{birthDayMonth || "Day and month only — no year"}</p></div>
+                    <button type="button" onClick={openBirthdayDialog} className="shrink-0 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-bold text-[var(--its-red)] hover:bg-muted"><Gift size={12} className="mr-1 inline" />{birthDayMonth ? "Change" : "Add"}</button>
                   </div>
                 </div>
               </div>
@@ -1001,6 +1029,7 @@ export default function Profile() {
                   {user.hometown && <p className="text-xs text-muted-foreground">From: {user.hometown}</p>}
                   {user.currentLocation && <p className="text-xs text-muted-foreground">Lives in: {user.currentLocation}</p>}
                   {birthDayMonth && <p className="text-xs text-muted-foreground">Birthday: {birthDayMonth}</p>}
+                  {isOwnProfile && <button type="button" onClick={openBirthdayDialog} className="mt-1 inline-flex items-center gap-1.5 text-xs font-bold text-[var(--its-red)] hover:underline"><Gift size={12} />{birthDayMonth ? "Edit birthday" : "Add birthday"}</button>}
                   {user.hobby && <p className="text-xs text-muted-foreground">Hobby: {user.hobby}</p>}
                   {user.website && (
                     <a
@@ -1222,7 +1251,7 @@ export default function Profile() {
                   : "Add a bio to tell people a bit about yourself."}
               </p>
               <button
-                onClick={() => setEditing(true)}
+                onClick={startEditing}
                 className="text-xs font-bold uppercase tracking-widest text-[var(--its-red)] hover:underline"
               >
                 {!user.avatar ? "Add Photo →" : "Add Bio →"}

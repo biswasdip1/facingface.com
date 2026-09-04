@@ -263,6 +263,10 @@ export default function Feed() {
 
   const [watchingStreamId, setWatchingStreamId] = useState<number | null>(null);
   const [leftMoreOpen, setLeftMoreOpen] = useState(false);
+  const { data: homeEventsData } = trpc.events.getMy.useQuery(undefined, { staleTime: 60_000, refetchOnWindowFocus: false });
+  const { data: homeBirthdaysData } = trpc.events.birthdays.useQuery(undefined, { staleTime: 60_000, refetchOnWindowFocus: false });
+  const homeEvents = (homeEventsData?.events ?? []).slice(0, 5);
+  const homeBirthdays = [...(homeBirthdaysData?.today ?? []), ...(homeBirthdaysData?.upcoming ?? [])].slice(0, 5);
 
   // Pull-to-refresh
   const handleRefresh = useCallback(async () => {
@@ -361,6 +365,16 @@ export default function Feed() {
               <Link href="/events" className="flex items-center gap-2 px-5 py-2 text-sm font-semibold text-slate-700 hover:text-[var(--its-red)]">
                 <CalendarDays size={16} className="shrink-0 text-sky-600" /> Events
               </Link>
+              <div className="mt-2 space-y-3 border-t border-sky-100 px-2 pt-3">
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between gap-2"><span className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-500"><CalendarDays size={12} className="text-sky-600" />Upcoming events</span><Link href="/events" className="text-[10px] font-bold text-[var(--its-red)] hover:underline">All</Link></div>
+                  {homeEvents.length > 0 ? <div className="space-y-1">{homeEvents.map((event) => <Link key={event.id} href="/events" className="block rounded-md px-2 py-1.5 text-slate-700 transition-colors hover:bg-white/75"><p className="truncate text-xs font-bold">{event.title}</p><p className="mt-0.5 text-[10px] text-slate-500">{new Date(event.startsAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</p></Link>)}</div> : <p className="px-2 py-1 text-[11px] text-slate-500">No upcoming events.</p>}
+                </div>
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between gap-2"><span className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-500"><Gift size={12} className="text-amber-500" />Birthdays</span><Link href="/birthdays" className="text-[10px] font-bold text-[var(--its-red)] hover:underline">All</Link></div>
+                  {homeBirthdays.length > 0 ? <div className="space-y-1">{homeBirthdays.map((birthday) => <Link key={birthday.user.id} href={`/profile/${birthday.user.id}`} className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-slate-700 transition-colors hover:bg-white/75"><span className="truncate text-xs font-bold">{birthday.user.name ?? "Friend"}</span><span className="shrink-0 text-[10px] text-slate-500">{birthday.daysUntil === 0 ? "Today" : `${birthday.daysUntil}d`}</span></Link>)}</div> : <p className="px-2 py-1 text-[11px] text-slate-500">No upcoming birthdays.</p>}
+                </div>
+              </div>
             </div>
           )}
         </aside>
