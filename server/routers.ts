@@ -394,7 +394,7 @@ import { moderateContent, moderateImageBuffer } from "./moderation";
 import { storagePut } from "./storage";
 import { compressImage, compressAvatar, compressCover } from "./imageUtils";
 import { notifyOwner } from "./_core/notification";
-import { fetchLinkPreview, extractFirstUrl, countYouTubeUrls } from "./linkPreview";
+import { fetchLinkPreview, extractFirstUrl, countYouTubeUrls, isYouTubeUrl, extractYouTubeVideoId, getYouTubeThumbnailUrl } from "./linkPreview";
 import { sendCallPushNotification, sendDmPushNotification } from "./webpush";
 
 const countWords = (value: string | null | undefined): number => {
@@ -3438,24 +3438,19 @@ const publicGroupsRouter = router({
       let linkPreview = null;
       if (detectedLinkUrl) linkPreview = await fetchLinkPreview(detectedLinkUrl);
 
-      // Auto-generate video poster at 1s if mediaType=video and no custom poster was provided
-      let resolvedPosterUrl: string | null = input.videoPosterUrl ?? null;
-      
-      // Check if content contains a YouTube URL and generate thumbnail
-      if (!resolvedPosterUrl && input.content) {
-        try {
-          const { extractFirstUrl: extractUrl, isYouTubeUrl, extractYouTubeVideoId, getYouTubeThumbnailUrl } = await import("./linkPreview");
-          const contentUrl = extractUrl(input.content);
-          if (contentUrl && isYouTubeUrl(contentUrl)) {
-            const videoId = extractYouTubeVideoId(contentUrl);
-            if (videoId) {
-              resolvedPosterUrl = getYouTubeThumbnailUrl(videoId);
-            }
-          }
-        } catch (err) {
-          // Silently fail - YouTube thumbnail is optional
-        }
-      }
+      // YouTube does not always return an Open Graph image to server-side preview
+      // requests. Derive a stable image from its video ID so Group link cards keep
+      // a visible video thumbnail even when remote metadata omits one.
+      const youtubeThumbnailUrl = detectedLinkUrl && isYouTubeUrl(detectedLinkUrl)
+        ? (() => {
+            const videoId = extractYouTubeVideoId(detectedLinkUrl);
+            return videoId ? getYouTubeThumbnailUrl(videoId) : null;
+          })()
+        : null;
+
+      // Auto-generate video poster at 1s if mediaType=video and no custom poster was provided.
+      // A YouTube link uses its thumbnail as the matching poster.
+      let resolvedPosterUrl: string | null = input.videoPosterUrl ?? youtubeThumbnailUrl;
       if (input.mediaType === "video" && input.mediaUrl && !resolvedPosterUrl && /^https?:\/\//i.test(input.mediaUrl)) {
         try {
           const { extractVideoFrame } = await import("./videoUtils");
@@ -3503,7 +3498,7 @@ const publicGroupsRouter = router({
         linkUrl: linkPreview?.url ?? detectedLinkUrl ?? null,
         linkTitle: linkPreview?.title ?? null,
         linkDescription: linkPreview?.description ?? null,
-        linkImage: linkPreview?.image ?? null,
+        linkImage: linkPreview?.image ?? youtubeThumbnailUrl ?? null,
         linkSiteName: linkPreview?.siteName ?? null,
       });
 

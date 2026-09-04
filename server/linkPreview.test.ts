@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchLinkPreview, extractFirstUrl } from "./linkPreview";
+import { fetchLinkPreview, extractFirstUrl, extractYouTubeVideoId, getYouTubeThumbnailUrl, isYouTubeUrl } from "./linkPreview";
 
 // ─── extractFirstUrl ──────────────────────────────────────────────────────────
 
@@ -34,6 +34,17 @@ describe("extractFirstUrl", () => {
     expect(
       extractFirstUrl("See https://example.com/path?q=hello&page=1#section for details")
     ).toBe("https://example.com/path?q=hello&page=1#section");
+  });
+});
+
+// ─── YouTube thumbnail fallback ──────────────────────────────────────────────
+
+describe("YouTube thumbnail fallback", () => {
+  it("derives a stable high-quality thumbnail from a short YouTube URL", () => {
+    const url = "https://youtu.be/Sg0LsgAf54Q?si=k6FlOvThIVK_i28ZX";
+    expect(isYouTubeUrl(url)).toBe(true);
+    expect(extractYouTubeVideoId(url)).toBe("Sg0LsgAf54Q");
+    expect(getYouTubeThumbnailUrl("Sg0LsgAf54Q")).toBe("https://img.youtube.com/vi/Sg0LsgAf54Q/hqdefault.jpg");
   });
 });
 

@@ -189,9 +189,9 @@ export function extractYouTubeUrls(text: string): string[] {
 
 /**
  * Generates a YouTube thumbnail URL from a video ID.
- * Returns the maxresdefault (1280x720) thumbnail.
+ * Returns the high-quality default thumbnail, which YouTube reliably provides even when a video has no max-resolution artwork.
  */
 export function getYouTubeThumbnailUrl(videoId: string): string {
   if (!videoId || videoId.length === 0) return "";
-  return `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+  return `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
 }

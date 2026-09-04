@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { formatDistanceToNow } from "date-fns";
-import { Bookmark, ExternalLink, FileText, MessageCircle, Repeat2, Send, Trash2 } from "lucide-react";
+import { Bookmark, ExternalLink, FileText, MessageCircle, Play, Repeat2, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -138,6 +138,7 @@ export default function GroupPostCard({
   const { user } = useAuth();
   const [showComments, setShowComments] = useState(false);
   const [commentText, setCommentText] = useState("");
+  const [previewImageFailed, setPreviewImageFailed] = useState(false);
   const { data: commentData, isLoading: commentsLoading } = trpc.publicGroups.getComments.useQuery(
     { handle: groupHandle, postId: post.id },
     { enabled: showComments },
@@ -177,6 +178,7 @@ export default function GroupPostCard({
   const commentCount = commentData?.comments.length ?? initialCommentCount;
   const background = post.bgColor ?? "";
   const hasPreview = Boolean(post.linkUrl && (post.linkTitle || post.linkDescription || post.linkImage));
+  const isYouTubePreview = Boolean(post.linkUrl && /(^|\.)youtube\.com|(^|\.)youtu\.be/i.test(new URL(post.linkUrl).hostname));
   const textWithoutPreviewUrl = hasPreview ? post.content?.replace(post.linkUrl ?? "", "").trim() : post.content;
 
   return (
@@ -210,7 +212,14 @@ export default function GroupPostCard({
 
         {hasPreview && post.linkUrl && (
           <a href={post.linkUrl} target="_blank" rel="noopener noreferrer" className="block border border-border rounded-lg overflow-hidden mb-3 hover:border-primary/60 hover:bg-muted/40 transition-colors">
-            {post.linkImage && <img src={post.linkImage} alt="" className="w-full max-h-80 object-cover" />}
+            {post.linkImage && !previewImageFailed ? (
+              <img src={post.linkImage} alt="" className="w-full max-h-80 object-cover" onError={() => setPreviewImageFailed(true)} />
+            ) : isYouTubePreview ? (
+              <div className="min-h-44 flex items-center justify-center gap-3 bg-[#ff0000] px-5 text-white" aria-label="YouTube video preview">
+                <span className="flex h-12 w-16 items-center justify-center rounded-xl bg-white/20"><Play className="h-7 w-7 fill-white" /></span>
+                <span className="text-lg font-bold">YouTube video</span>
+              </div>
+            ) : null}
             <div className="p-3">
               <p className="text-xs uppercase tracking-wide text-muted-foreground truncate">{post.linkSiteName ?? new URL(post.linkUrl).hostname}</p>
               {post.linkTitle && <p className="font-semibold text-sm mt-1 line-clamp-2">{post.linkTitle}</p>}

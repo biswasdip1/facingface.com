@@ -1,5 +1,6 @@
 import { orgPagePosts, OrgPagePost, InsertOrgPagePost, commentReactions } from "./../drizzle/schema";
 import { countEffectiveReactions, mergePostReactors, type DurablePostReactor } from "./reactionConsistency";
+import { extractYouTubeVideoId, getYouTubeThumbnailUrl, isYouTubeUrl } from "./linkPreview";
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -3366,13 +3367,25 @@ export async function createPublicGroupPost(data: InsertPublicGroupPost): Promis
   return result[0].id;
 }
 
+/**
+ * Existing Group posts may have text-only YouTube metadata from before the
+ * thumbnail fallback was introduced. Fill only the response image field so
+ * older posts show a preview without rewriting any stored user content.
+ */
+export function withPublicGroupYouTubeThumbnail(post: PublicGroupPost): PublicGroupPost {
+  if (post.linkImage || !post.linkUrl || !isYouTubeUrl(post.linkUrl)) return post;
+  const videoId = extractYouTubeVideoId(post.linkUrl);
+  return videoId ? { ...post, linkImage: getYouTubeThumbnailUrl(videoId) } : post;
+}
+
 export async function getPublicGroupPosts(groupId: number, limit = 20, offset = 0): Promise<PublicGroupPost[]> {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(publicGroupPosts)
+  const rows = await db.select().from(publicGroupPosts)
     .where(eq(publicGroupPosts.groupId, groupId))
     .orderBy(desc(publicGroupPosts.createdAt))
     .limit(limit).offset(offset);
+  return rows.map(withPublicGroupYouTubeThumbnail);
 }
 
 export async function deletePublicGroupPost(id: number, authorId: number): Promise<void> {
@@ -3385,7 +3398,7 @@ export async function getPublicGroupPostById(id: number): Promise<PublicGroupPos
   const db = await getDb();
   if (!db) return undefined;
   const [post] = await db.select().from(publicGroupPosts).where(eq(publicGroupPosts.id, id)).limit(1);
-  return post;
+  return post ? withPublicGroupYouTubeThumbnail(post) : undefined;
 }
 
 export async function getPublicGroupPostComments(postId: number, limit = 50): Promise<PublicGroupPostComment[]> {
