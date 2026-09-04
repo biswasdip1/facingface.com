@@ -244,6 +244,36 @@ async function existingIndexNames(tableName: string): Promise<Set<string>> {
   return new Set(rows.map((row) => row.indexname).filter((name): name is string => Boolean(name)));
 }
 
+let publicGroupCommentStorageReady = false;
+export async function ensurePublicGroupCommentStorage(): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  if (publicGroupCommentStorageReady) return true;
+  try {
+    if (!(await relationExists("public_group_post_comments"))) {
+      await db.execute(sql`
+        CREATE TABLE "public_group_post_comments" (
+          "id" serial PRIMARY KEY NOT NULL,
+          "postId" integer NOT NULL,
+          "authorId" integer NOT NULL,
+          "text" text NOT NULL,
+          "createdAt" timestamp DEFAULT now() NOT NULL,
+          "updatedAt" timestamp DEFAULT now() NOT NULL
+        )
+      `);
+    }
+    const indexNames = await existingIndexNames("public_group_post_comments");
+    if (!indexNames.has("public_group_post_comments_postId_idx")) {
+      await db.execute(sql`CREATE INDEX "public_group_post_comments_postId_idx" ON "public_group_post_comments" ("postId", "createdAt")`);
+    }
+    publicGroupCommentStorageReady = true;
+    return true;
+  } catch (error) {
+    console.warn("[PublicGroups] Comment storage is unavailable; timeline posts will still load.", error instanceof Error ? error.message : error);
+    return false;
+  }
+}
+
 export async function ensureInactiveReminderStorage(): Promise<boolean> {
   const db = await getDb();
   if (!db) {
@@ -337,6 +367,17 @@ export async function ensureLegacyRuntimeSchema(): Promise<void> {
     // New Page posts use a dedicated pageId. Older Page records retain their
     // original page:<id> marker, so both generations remain visible and stay
     // outside ordinary personal-feed queries.
+    if (await relationExists("public_groups")) {
+      const groupColumns = await existingColumns("public_groups");
+      if (!groupColumns.has("legacyHandle")) {
+        await db.execute(sql`ALTER TABLE "public_groups" ADD COLUMN "legacyHandle" varchar(100)`);
+      }
+      const groupIndexes = await existingIndexNames("public_groups");
+      if (!groupIndexes.has("public_groups_legacyHandle_idx")) {
+        await db.execute(sql`CREATE INDEX "public_groups_legacyHandle_idx" ON "public_groups" ("legacyHandle")`);
+      }
+    }
+
     if (await relationExists("posts")) {
       const postColumns = await existingColumns("posts");
       if (!postColumns.has("pageId")) {
@@ -348,25 +389,9 @@ export async function ensureLegacyRuntimeSchema(): Promise<void> {
       }
     }
 
-    // Group-post identifiers are independent of normal post identifiers, so
-    // standard Group discussions use their own comment storage. Create it only
-    // when absent; this does not rewrite any existing Group post data.
-    if (!(await relationExists("public_group_post_comments"))) {
-      await db.execute(sql`
-        CREATE TABLE "public_group_post_comments" (
-          "id" serial PRIMARY KEY NOT NULL,
-          "postId" integer NOT NULL,
-          "authorId" integer NOT NULL,
-          "text" text NOT NULL,
-          "createdAt" timestamp DEFAULT now() NOT NULL,
-          "updatedAt" timestamp DEFAULT now() NOT NULL
-        )
-      `);
-    }
-    const groupCommentIndexes = await existingIndexNames("public_group_post_comments");
-    if (!groupCommentIndexes.has("public_group_post_comments_postId_idx")) {
-      await db.execute(sql`CREATE INDEX "public_group_post_comments_postId_idx" ON "public_group_post_comments" ("postId", "createdAt")`);
-    }
+    // Group comments are a self-contained compatibility structure. A failure
+    // here must never prevent existing Group posts from appearing.
+    await ensurePublicGroupCommentStorage();
 
     if (await relationExists("reel_likes")) {
       // Duplicate rows represent repeated clicks rather than separate people.
@@ -2883,11 +2908,32 @@ export async function createPublicGroup(data: InsertPublicGroup): Promise<number
   return result[0].id;
 }
 
+export function isUnsafePublicGroupHandle(handle: string): boolean {
+  return /^https?(?:[-_]|$|[a-z0-9])/i.test(handle) || handle.toLowerCase().startsWith("http");
+}
+
+export function canonicalPublicGroupHandle(id: number): string {
+  return `group-${id}`;
+}
+
 export async function getPublicGroupByHandle(handle: string): Promise<PublicGroup | undefined> {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await db.select().from(publicGroups).where(eq(publicGroups.handle, handle)).limit(1);
+  const result = await db.select().from(publicGroups)
+    .where(or(eq(publicGroups.handle, handle), eq(publicGroups.legacyHandle, handle)))
+    .limit(1);
   return result[0];
+}
+
+export async function normaliseUnsafePublicGroupHandle(group: PublicGroup): Promise<PublicGroup> {
+  if (!isUnsafePublicGroupHandle(group.handle)) return group;
+  const db = await getDb();
+  if (!db) return group;
+  const canonicalHandle = canonicalPublicGroupHandle(group.id);
+  await db.update(publicGroups)
+    .set({ handle: canonicalHandle, legacyHandle: group.handle, updatedAt: new Date() })
+    .where(eq(publicGroups.id, group.id));
+  return { ...group, handle: canonicalHandle, legacyHandle: group.handle };
 }
 
 export async function getPublicGroupById(id: number): Promise<PublicGroup | undefined> {
@@ -2980,7 +3026,7 @@ export async function getPublicGroupPostById(id: number): Promise<PublicGroupPos
 
 export async function getPublicGroupPostComments(postId: number, limit = 50): Promise<PublicGroupPostComment[]> {
   const db = await getDb();
-  if (!db) return [];
+  if (!db || !(await ensurePublicGroupCommentStorage())) return [];
   return db.select().from(publicGroupPostComments)
     .where(eq(publicGroupPostComments.postId, postId))
     .orderBy(asc(publicGroupPostComments.createdAt))
@@ -2989,17 +3035,22 @@ export async function getPublicGroupPostComments(postId: number, limit = 50): Pr
 
 export async function getPublicGroupPostCommentCounts(postIds: number[]): Promise<Record<number, number>> {
   const db = await getDb();
-  if (!db || postIds.length === 0) return {};
-  const rows = await db.select({ postId: publicGroupPostComments.postId, count: sql<number>`count(*)` })
-    .from(publicGroupPostComments)
-    .where(inArray(publicGroupPostComments.postId, postIds))
-    .groupBy(publicGroupPostComments.postId);
-  return Object.fromEntries(rows.map((row) => [row.postId, Number(row.count)]));
+  if (!db || postIds.length === 0 || !(await ensurePublicGroupCommentStorage())) return {};
+  try {
+    const rows = await db.select({ postId: publicGroupPostComments.postId, count: sql<number>`count(*)` })
+      .from(publicGroupPostComments)
+      .where(inArray(publicGroupPostComments.postId, postIds))
+      .groupBy(publicGroupPostComments.postId);
+    return Object.fromEntries(rows.map((row) => [row.postId, Number(row.count)]));
+  } catch (error) {
+    console.warn("[PublicGroups] Comment counts unavailable; rendering posts without counts.", error instanceof Error ? error.message : error);
+    return {};
+  }
 }
 
 export async function createPublicGroupPostComment(postId: number, authorId: number, text: string): Promise<number> {
   const db = await getDb();
-  if (!db) throw new Error("Database not available");
+  if (!db || !(await ensurePublicGroupCommentStorage())) throw new Error("Group comments are temporarily unavailable. Please try again shortly.");
   const [comment] = await db.insert(publicGroupPostComments)
     .values({ postId, authorId, text })
     .returning({ id: publicGroupPostComments.id });

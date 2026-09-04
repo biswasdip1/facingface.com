@@ -1,5 +1,5 @@
-import { useState, useRef } from "react";
-import { useRoute, Link } from "wouter";
+import { useEffect, useState, useRef } from "react";
+import { useRoute, useLocation, Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -155,6 +155,7 @@ function GroupPostCard({
 // ─── Main GroupView ───────────────────────────────────────────────────────────
 export default function GroupView() {
   const [, params] = useRoute("/g/:handle");
+  const [, navigate] = useLocation();
   const handle = params?.handle ?? "";
   const { user } = useAuth();
   const utils = trpc.useUtils();
@@ -177,6 +178,14 @@ export default function GroupView() {
     { handle, limit: 50 },
     { enabled: !!handle }
   );
+
+  // Old Groups created with a pasted URL are retained, but immediately move to
+  // their safe canonical address. Their members and posts stay unchanged.
+  useEffect(() => {
+    if (group?.canonicalHandle && group.canonicalHandle !== handle) {
+      navigate(`/g/${group.canonicalHandle}`, { replace: true });
+    }
+  }, [group?.canonicalHandle, handle, navigate]);
 
   const joinMutation = trpc.publicGroups.join.useMutation({
     onSuccess: () => {

@@ -600,6 +600,8 @@ export type InsertSubscription = typeof subscriptions.$inferInsert;
 export const publicGroups = pgTable("public_groups", {
   id: serial("id").primaryKey(),
   handle: varchar("handle", { length: 100 }).notNull().unique(),
+  // Retains an old malformed handle while the Group is redirected to its safe canonical handle.
+  legacyHandle: varchar("legacyHandle", { length: 100 }),
   name: varchar("name", { length: 150 }).notNull(),
   description: text("description"),
   category: varchar("category", { length: 80 }),

@@ -7,6 +7,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { ReactionBar } from "@/components/PostCard";
 
 type GroupAuthor = { id: number; name: string | null; avatar: string | null; isVerified?: boolean };
@@ -62,6 +63,7 @@ export default function GroupPostCard({
   onDelete?: () => void;
 }) {
   const utils = trpc.useUtils();
+  const { user } = useAuth();
   const [showComments, setShowComments] = useState(false);
   const [commentText, setCommentText] = useState("");
   const { data: commentData, isLoading: commentsLoading } = trpc.publicGroups.getComments.useQuery(
@@ -152,7 +154,7 @@ export default function GroupPostCard({
               return <div key={comment.id} className="flex gap-2">
                 <Avatar className="w-7 h-7"><AvatarImage src={commentAuthor?.avatar ?? undefined} /><AvatarFallback>{initials(commentAuthor?.name)}</AvatarFallback></Avatar>
                 <div className="min-w-0 flex-1 rounded-lg bg-muted p-2"><p className="text-xs font-semibold">{commentAuthor?.name ?? "Member"}</p><p className="text-sm whitespace-pre-wrap break-words">{comment.text}</p></div>
-                {comment.authorId === author?.id && <button type="button" className="text-muted-foreground hover:text-destructive" onClick={() => deleteComment.mutate({ handle: groupHandle, commentId: comment.id })} aria-label="Delete comment"><Trash2 className="w-3.5 h-3.5" /></button>}
+                {comment.authorId === user?.id && <button type="button" className="text-muted-foreground hover:text-destructive" onClick={() => deleteComment.mutate({ handle: groupHandle, commentId: comment.id })} aria-label="Delete comment"><Trash2 className="w-3.5 h-3.5" /></button>}
               </div>;
             })}
             <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); const text = commentText.trim(); if (text) addComment.mutate({ handle: groupHandle, postId: post.id, text }); }}>

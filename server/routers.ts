@@ -197,6 +197,7 @@ import {
   transferPageOwnership,
   createPublicGroup,
   getPublicGroupByHandle,
+  normaliseUnsafePublicGroupHandle,
   listPublicGroups,
   updatePublicGroup,
   joinPublicGroup,
@@ -3141,7 +3142,7 @@ const pagesRouter = router({
 const publicGroupsRouter = router({
   create: protectedProcedure
     .input(z.object({
-      handle: z.string().min(2).max(100).regex(/^[a-z0-9-]+$/),
+      handle: z.string().min(2).max(100).regex(/^[a-z0-9-]+$/).refine((value) => !value.toLowerCase().startsWith("http"), "Handle cannot be a web address"),
       name: z.string().min(2).max(150),
       description: z.string().max(1000).optional(),
       category: z.string().max(80).optional(),
@@ -3163,11 +3164,14 @@ const publicGroupsRouter = router({
   getByHandle: publicProcedure
     .input(z.object({ handle: z.string() }))
     .query(async ({ input, ctx }) => {
-      const group = await getPublicGroupByHandle(input.handle);
-      if (!group) return null;
+      const foundGroup = await getPublicGroupByHandle(input.handle);
+      if (!foundGroup) return null;
+      const group = await normaliseUnsafePublicGroupHandle(foundGroup);
       const membership = ctx.user ? await getPublicGroupMembership(group.id, ctx.user.id) : null;
       return {
         ...group,
+        requestedHandle: input.handle,
+        canonicalHandle: group.handle,
         isMember: !!membership,
         isAdmin: membership?.role === "admin",
         isModerator: membership?.role === "moderator",
