@@ -103,6 +103,15 @@ import {
   getPendingFriendRequestsWithSenders,
   getSentFriendRequestsWithReceivers,
   getFriendsWithProfiles,
+  getFriendBirthdays,
+  createSocialEvent,
+  getSocialEventById,
+  createSocialEventInvitations,
+  getSocialEventsForUser,
+  getSocialEventInvitation,
+  setSocialEventResponse,
+  getSocialEventAttendance,
+  deleteSocialEvent,
   getOrCreateConversation,
   getConversationsForUser,
   getMessages,
@@ -4585,6 +4594,102 @@ const inactiveRemindersRouter = router({
     }),
 });
 
+const eventsRouter = router({
+  getMy: protectedProcedure.query(async ({ ctx }) => {
+    const events = await getSocialEventsForUser(ctx.user.id);
+    const attendance = await getSocialEventAttendance(events.map((event) => event.id));
+    return { events, attendance };
+  }),
+
+  invitableFriends: protectedProcedure.query(async ({ ctx }) => {
+    const friends = await getFriendsWithProfiles(ctx.user.id);
+    return {
+      friends: friends.map((row) => ({
+        id: row.friend!.id,
+        name: row.friend!.name,
+        avatar: row.friend!.avatar ?? null,
+      })),
+    };
+  }),
+
+  birthdays: protectedProcedure.query(async ({ ctx }) => {
+    const birthdays = await getFriendBirthdays(ctx.user.id);
+    return {
+      today: birthdays.filter((birthday) => birthday.daysUntil === 0),
+      upcoming: birthdays.filter((birthday) => birthday.daysUntil > 0),
+    };
+  }),
+
+  create: protectedProcedure
+    .input(z.object({
+      title: z.string().trim().min(2).max(200),
+      description: z.string().trim().max(2_000).optional().nullable(),
+      location: z.string().trim().max(255).optional().nullable(),
+      startsAt: z.coerce.date(),
+      endsAt: z.coerce.date().optional().nullable(),
+      inviteeIds: z.array(z.number().int().positive()).max(100).default([]),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      if (input.startsAt.getTime() < Date.now() - 60_000) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Choose a future start date and time for the event." });
+      }
+      if (input.endsAt && input.endsAt.getTime() <= input.startsAt.getTime()) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "The event end time must be after its start time." });
+      }
+
+      const inviteeIds = [...new Set(input.inviteeIds)].filter((id) => id !== ctx.user.id);
+      const friendshipChecks = await Promise.all(inviteeIds.map(async (id) => ({ id, isFriend: await areFriends(ctx.user.id, id) })));
+      if (friendshipChecks.some((check) => !check.isFriend)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Events can be sent only to accepted friends." });
+      }
+
+      const eventId = await createSocialEvent({
+        organizerId: ctx.user.id,
+        title: input.title,
+        description: input.description?.trim() || null,
+        location: input.location?.trim() || null,
+        startsAt: input.startsAt,
+        endsAt: input.endsAt ?? null,
+      });
+      await createSocialEventInvitations(eventId, ctx.user.id, inviteeIds);
+      return { eventId };
+    }),
+
+  invite: protectedProcedure
+    .input(z.object({ eventId: z.number().int().positive(), inviteeIds: z.array(z.number().int().positive()).min(1).max(100) }))
+    .mutation(async ({ ctx, input }) => {
+      const event = await getSocialEventById(input.eventId);
+      if (!event) throw new TRPCError({ code: "NOT_FOUND", message: "Event not found." });
+      if (event.organizerId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "Only the event host can invite friends." });
+      const inviteeIds = [...new Set(input.inviteeIds)].filter((id) => id !== ctx.user.id);
+      const friendshipChecks = await Promise.all(inviteeIds.map(async (id) => ({ id, isFriend: await areFriends(ctx.user.id, id) })));
+      if (friendshipChecks.some((check) => !check.isFriend)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Events can be sent only to accepted friends." });
+      }
+      await createSocialEventInvitations(event.id, ctx.user.id, inviteeIds);
+      return { success: true };
+    }),
+
+  respond: protectedProcedure
+    .input(z.object({ eventId: z.number().int().positive(), status: z.enum(["going", "maybe", "declined"]) }))
+    .mutation(async ({ ctx, input }) => {
+      const invitation = await getSocialEventInvitation(input.eventId, ctx.user.id);
+      if (!invitation) throw new TRPCError({ code: "FORBIDDEN", message: "You do not have an invitation to this event." });
+      await setSocialEventResponse(input.eventId, ctx.user.id, input.status);
+      return { success: true };
+    }),
+
+  cancel: protectedProcedure
+    .input(z.object({ eventId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const event = await getSocialEventById(input.eventId);
+      if (!event) throw new TRPCError({ code: "NOT_FOUND", message: "Event not found." });
+      if (event.organizerId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "Only the event host can cancel this event." });
+      await deleteSocialEvent(event.id, ctx.user.id);
+      return { success: true };
+    }),
+});
+
 export const appRouter = router({
   system: systemRouter,
   auth: router({
@@ -5150,6 +5255,7 @@ export const appRouter = router({
   broadcasts: broadcastRouter,
   stopStreams: stopAllStreamsRouter,
   inactiveReminders: inactiveRemindersRouter,
+  events: eventsRouter,
 });
 export type AppRouter = typeof appRouter;
 

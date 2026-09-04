@@ -275,6 +275,36 @@ export const friendships = pgTable("friendships", {
 export type Friendship = typeof friendships.$inferSelect;
 export type InsertFriendship = typeof friendships.$inferInsert;
 
+// ─── Social Events ─────────────────────────────────────────────────────────────
+// Events are visible only to their organiser and the accepted-friend invitees.
+// Invitations retain the recipient's RSVP without exposing a public guest list.
+export const socialEvents = pgTable("social_events", {
+  id: serial("id").primaryKey(),
+  organizerId: integer("organizerId").notNull(),
+  title: varchar("title", { length: 200 }).notNull(),
+  description: text("description"),
+  location: varchar("location", { length: 255 }),
+  startsAt: timestamp("startsAt").notNull(),
+  endsAt: timestamp("endsAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type SocialEvent = typeof socialEvents.$inferSelect;
+export type InsertSocialEvent = typeof socialEvents.$inferInsert;
+
+export const socialEventInvitations = pgTable("social_event_invitations", {
+  id: serial("id").primaryKey(),
+  eventId: integer("eventId").notNull(),
+  userId: integer("userId").notNull(),
+  invitedById: integer("invitedById").notNull(),
+  status: varchar("status", { length: 12 }).default("invited").notNull(),
+  respondedAt: timestamp("respondedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type SocialEventInvitation = typeof socialEventInvitations.$inferSelect;
+export type InsertSocialEventInvitation = typeof socialEventInvitations.$inferInsert;
+
 // ─── Direct Messaging ────────────────────────────────────────────────────────
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),

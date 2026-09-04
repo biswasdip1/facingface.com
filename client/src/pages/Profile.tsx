@@ -972,7 +972,8 @@ export default function Profile() {
                       max={31}
                       value={editBirthDay}
                       onChange={(e) => setEditBirthDay(e.target.value)}
-                      placeholder="Birth date"
+                      placeholder="Birth day"
+                      aria-label="Birth day only; no birth year"
                       className="w-full border-b border-border px-0 py-1 text-sm text-foreground placeholder-gray-400 focus:outline-none bg-transparent"
                     />
                     <select

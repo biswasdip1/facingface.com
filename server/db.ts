@@ -85,6 +85,12 @@ import {
   PublicGroupPostComment,
   publicGroupPostReactions,
   publicGroupPostSaves,
+  socialEvents,
+  SocialEvent,
+  InsertSocialEvent,
+  socialEventInvitations,
+  SocialEventInvitation,
+  InsertSocialEventInvitation,
   stories,
   Story,
   InsertStory,
@@ -317,6 +323,48 @@ export async function ensurePublicGroupInteractionStorage(): Promise<boolean> {
   }
 }
 
+let socialEventStorageReady = false;
+export async function ensureSocialEventStorage(): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  if (socialEventStorageReady) return true;
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "social_events" (
+        "id" serial PRIMARY KEY NOT NULL,
+        "organizerId" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+        "title" varchar(200) NOT NULL,
+        "description" text,
+        "location" varchar(255),
+        "startsAt" timestamp NOT NULL,
+        "endsAt" timestamp,
+        "createdAt" timestamp DEFAULT now() NOT NULL,
+        "updatedAt" timestamp DEFAULT now() NOT NULL
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "social_event_invitations" (
+        "id" serial PRIMARY KEY NOT NULL,
+        "eventId" integer NOT NULL REFERENCES "social_events"("id") ON DELETE CASCADE,
+        "userId" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+        "invitedById" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+        "status" varchar(12) NOT NULL DEFAULT 'invited',
+        "respondedAt" timestamp,
+        "createdAt" timestamp DEFAULT now() NOT NULL,
+        "updatedAt" timestamp DEFAULT now() NOT NULL
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "social_event_invitation_event_user_unique" ON "social_event_invitations" ("eventId", "userId")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "social_events_organizer_start_idx" ON "social_events" ("organizerId", "startsAt")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "social_event_invitation_user_status_idx" ON "social_event_invitations" ("userId", "status", "eventId")`);
+    socialEventStorageReady = true;
+    return true;
+  } catch (error) {
+    console.warn("[Events] Event storage is unavailable.", error instanceof Error ? error.message : error);
+    return false;
+  }
+}
+
 export async function ensureInactiveReminderStorage(): Promise<boolean> {
   const db = await getDb();
   if (!db) {
@@ -488,6 +536,7 @@ export async function ensureLegacyRuntimeSchema(): Promise<void> {
     // structures. A failure must never prevent existing Group posts from loading.
     await ensurePublicGroupCommentStorage();
     await ensurePublicGroupInteractionStorage();
+    await ensureSocialEventStorage();
 
     if (await relationExists("reel_likes")) {
       // Duplicate rows represent repeated clicks rather than separate people.
@@ -1988,6 +2037,114 @@ export async function areFriends(userId1: number, userId2: number): Promise<bool
      OR (${friendships.userId1} = ${userId2} AND ${friendships.userId2} = ${userId1})`
   );
   return rows.length > 0;
+}
+
+export type SocialEventForUser = SocialEvent & { invitation: SocialEventInvitation | null };
+
+export function isValidBirthdayDayMonth(day: number | null | undefined, month: number | null | undefined): boolean {
+  if (!Number.isInteger(day) || !Number.isInteger(month) || !day || !month || month < 1 || month > 12) return false;
+  const maxDaysByMonth = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day >= 1 && day <= maxDaysByMonth[month - 1];
+}
+
+function birthdayOccurrence(day: number, month: number, year: number): Date {
+  // People born on 29 February are celebrated on 28 February in non-leap years.
+  const isLeapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const observedDay = month === 2 && day === 29 && !isLeapYear ? 28 : day;
+  return new Date(year, month - 1, observedDay, 12, 0, 0, 0);
+}
+
+export function getBirthdayDaysUntil(day: number, month: number, from = new Date()): { daysUntil: number; nextBirthdayAt: Date } {
+  const today = new Date(from.getFullYear(), from.getMonth(), from.getDate(), 12, 0, 0, 0);
+  let nextBirthdayAt = birthdayOccurrence(day, month, today.getFullYear());
+  if (nextBirthdayAt.getTime() < today.getTime()) nextBirthdayAt = birthdayOccurrence(day, month, today.getFullYear() + 1);
+  return { daysUntil: Math.round((nextBirthdayAt.getTime() - today.getTime()) / 86_400_000), nextBirthdayAt };
+}
+
+export async function getFriendBirthdays(userId: number): Promise<Array<{ user: User; daysUntil: number; nextBirthdayAt: Date }>> {
+  const friends = await getFriendsWithProfiles(userId);
+  return friends
+    .map((row) => row.friend)
+    .filter((friend): friend is User => Boolean(friend) && isValidBirthdayDayMonth(friend.birthDay, friend.birthMonth))
+    .map((friend) => ({ user: friend, ...getBirthdayDaysUntil(friend.birthDay!, friend.birthMonth!) }))
+    .sort((a, b) => a.daysUntil - b.daysUntil || a.user.name?.localeCompare(b.user.name ?? "") || 0);
+}
+
+export async function createSocialEvent(data: InsertSocialEvent): Promise<number> {
+  const db = await getDb();
+  if (!db || !(await ensureSocialEventStorage())) throw new Error("Event storage is temporarily unavailable. Please try again shortly.");
+  const [event] = await db.insert(socialEvents).values(data).returning({ id: socialEvents.id });
+  return event.id;
+}
+
+export async function getSocialEventById(eventId: number): Promise<SocialEvent | undefined> {
+  const db = await getDb();
+  if (!db || !(await ensureSocialEventStorage())) return undefined;
+  const [event] = await db.select().from(socialEvents).where(eq(socialEvents.id, eventId)).limit(1);
+  return event;
+}
+
+export async function getSocialEventInvitation(eventId: number, userId: number): Promise<SocialEventInvitation | undefined> {
+  const db = await getDb();
+  if (!db || !(await ensureSocialEventStorage())) return undefined;
+  const [invitation] = await db.select().from(socialEventInvitations).where(and(
+    eq(socialEventInvitations.eventId, eventId),
+    eq(socialEventInvitations.userId, userId),
+  )).limit(1);
+  return invitation;
+}
+
+export async function createSocialEventInvitations(eventId: number, inviterId: number, userIds: number[]): Promise<void> {
+  const db = await getDb();
+  if (!db || !(await ensureSocialEventStorage())) throw new Error("Event invitations are temporarily unavailable. Please try again shortly.");
+  const uniqueUserIds = [...new Set(userIds)].filter((userId) => userId !== inviterId);
+  if (uniqueUserIds.length === 0) return;
+  await db.insert(socialEventInvitations).values(uniqueUserIds.map((userId) => ({ eventId, userId, invitedById: inviterId, status: "invited" }))).onConflictDoNothing();
+}
+
+export async function getSocialEventsForUser(userId: number): Promise<SocialEventForUser[]> {
+  const db = await getDb();
+  if (!db || !(await ensureSocialEventStorage())) return [];
+  const invitationRows = await db.select().from(socialEventInvitations).where(eq(socialEventInvitations.userId, userId));
+  const invitedEventIds = invitationRows.map((invitation) => invitation.eventId);
+  const visibleCondition = invitedEventIds.length > 0
+    ? or(eq(socialEvents.organizerId, userId), inArray(socialEvents.id, invitedEventIds))
+    : eq(socialEvents.organizerId, userId);
+  const events = await db.select().from(socialEvents)
+    .where(and(visibleCondition, gte(socialEvents.startsAt, new Date(Date.now() - 24 * 60 * 60 * 1000))))
+    .orderBy(asc(socialEvents.startsAt));
+  const invitationByEvent = new Map(invitationRows.map((invitation) => [invitation.eventId, invitation]));
+  return events.map((event) => ({ ...event, invitation: invitationByEvent.get(event.id) ?? null }));
+}
+
+export async function setSocialEventResponse(eventId: number, userId: number, status: "going" | "maybe" | "declined"): Promise<void> {
+  const db = await getDb();
+  if (!db || !(await ensureSocialEventStorage())) throw new Error("Event invitations are temporarily unavailable. Please try again shortly.");
+  await db.update(socialEventInvitations)
+    .set({ status, respondedAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(socialEventInvitations.eventId, eventId), eq(socialEventInvitations.userId, userId)));
+}
+
+export async function getSocialEventAttendance(eventIds: number[]): Promise<Record<number, { invited: number; going: number; maybe: number; declined: number }>> {
+  const db = await getDb();
+  if (!db || eventIds.length === 0 || !(await ensureSocialEventStorage())) return {};
+  const rows = await db.select({ eventId: socialEventInvitations.eventId, status: socialEventInvitations.status, count: sql<number>`count(*)` })
+    .from(socialEventInvitations)
+    .where(inArray(socialEventInvitations.eventId, eventIds))
+    .groupBy(socialEventInvitations.eventId, socialEventInvitations.status);
+  const summaries: Record<number, { invited: number; going: number; maybe: number; declined: number }> = {};
+  for (const eventId of eventIds) summaries[eventId] = { invited: 0, going: 0, maybe: 0, declined: 0 };
+  for (const row of rows) {
+    const summary = summaries[row.eventId];
+    if (summary && row.status in summary) summary[row.status as keyof typeof summary] = Number(row.count);
+  }
+  return summaries;
+}
+
+export async function deleteSocialEvent(eventId: number, organizerId: number): Promise<void> {
+  const db = await getDb();
+  if (!db || !(await ensureSocialEventStorage())) return;
+  await db.delete(socialEvents).where(and(eq(socialEvents.id, eventId), eq(socialEvents.organizerId, organizerId)));
 }
 
 export async function removeFriend(userId1: number, userId2: number) {
