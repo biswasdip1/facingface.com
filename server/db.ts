@@ -200,12 +200,37 @@ export async function getDb() {
 }
 
 /**
- * The existing Render database intentionally skips the old global migration
- * journal because its history contains an unrelated duplicate enum. This
- * narrow, idempotent compatibility check creates only the reminder history
- * table introduced after that database was first deployed. It never alters
- * users, posts, media, Pages, Groups, or any existing row.
+ * Production intentionally skips the old global migration journal because its
+ * history contains an unrelated duplicate enum. These narrow checks examine
+ * PostgreSQL metadata first and make only the missing, backwards-compatible
+ * change. Existing users, posts, media, Pages, Groups, reactions, and audit
+ * rows are never deleted or rewritten.
  */
+type SchemaRow = { tableName?: string; columnName?: string };
+
+async function existingColumns(tableName: string): Promise<Set<string>> {
+  const db = await getDb();
+  if (!db) return new Set();
+  const rows = await db.execute(sql`
+    SELECT column_name AS "columnName"
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = ${tableName}
+  `) as unknown as SchemaRow[];
+  return new Set(rows.map((row) => row.columnName).filter((column): column is string => Boolean(column)));
+}
+
+async function relationExists(tableName: string): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const rows = await db.execute(sql`
+    SELECT table_name AS "tableName"
+    FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = ${tableName}
+    LIMIT 1
+  `) as unknown as SchemaRow[];
+  return rows.length > 0;
+}
+
 export async function ensureInactiveReminderStorage(): Promise<boolean> {
   const db = await getDb();
   if (!db) {
@@ -214,28 +239,84 @@ export async function ensureInactiveReminderStorage(): Promise<boolean> {
   }
 
   try {
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS "inactiveUserReminders" (
-        "id" serial PRIMARY KEY NOT NULL,
-        "userId" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
-        "emailSentAt" timestamp DEFAULT now() NOT NULL,
-        "lastActivityAt" timestamp,
-        "reminderType" varchar(50) DEFAULT '14_days_inactive' NOT NULL
-      )
-    `);
-    await db.execute(sql`
-      CREATE INDEX IF NOT EXISTS "inactiveUserReminders_userId_idx"
-      ON "inactiveUserReminders" ("userId")
-    `);
-    await db.execute(sql`
-      CREATE INDEX IF NOT EXISTS "inactiveUserReminders_emailSentAt_idx"
-      ON "inactiveUserReminders" ("emailSentAt")
-    `);
+    if (!(await relationExists("inactiveUserReminders"))) {
+      await db.execute(sql`
+        CREATE TABLE "inactiveUserReminders" (
+          "id" serial PRIMARY KEY NOT NULL,
+          "userId" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+          "emailSentAt" timestamp DEFAULT now() NOT NULL,
+          "lastActivityAt" timestamp,
+          "reminderType" varchar(50) DEFAULT '14_days_inactive' NOT NULL
+        )
+      `);
+    }
+    const indexes = await db.execute(sql`
+      SELECT indexname FROM pg_indexes
+      WHERE schemaname = 'public' AND tablename = 'inactiveUserReminders'
+    `) as unknown as Array<{ indexname?: string }>;
+    const names = new Set(indexes.map((row) => row.indexname));
+    if (!names.has("inactiveUserReminders_userId_idx")) {
+      await db.execute(sql`CREATE INDEX "inactiveUserReminders_userId_idx" ON "inactiveUserReminders" ("userId")`);
+    }
+    if (!names.has("inactiveUserReminders_emailSentAt_idx")) {
+      await db.execute(sql`CREATE INDEX "inactiveUserReminders_emailSentAt_idx" ON "inactiveUserReminders" ("emailSentAt")`);
+    }
     console.info("[InactiveUserReminder] Reminder history storage is ready.");
     return true;
   } catch (error) {
     console.error("[InactiveUserReminder] Could not prepare reminder history storage:", error);
     return false;
+  }
+}
+
+/** Repairs only known legacy schema differences that are producing production errors. */
+export async function ensureLegacyRuntimeSchema(): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  try {
+    // The legacy database has an older admin_audit_log without current camelCase fields.
+    if (!(await relationExists("admin_audit_log"))) {
+      await db.execute(sql`
+        CREATE TABLE "admin_audit_log" (
+          "id" serial PRIMARY KEY NOT NULL,
+          "actorId" integer,
+          "actorName" varchar(255),
+          "action" varchar(100),
+          "targetUserId" integer,
+          "targetUserName" varchar(255),
+          "targetPostId" integer,
+          "metadata" text,
+          "createdAt" timestamp DEFAULT now()
+        )
+      `);
+    } else {
+      const auditColumns = await existingColumns("admin_audit_log");
+      if (!auditColumns.has("actorId")) await db.execute(sql`ALTER TABLE "admin_audit_log" ADD COLUMN "actorId" integer`);
+      if (!auditColumns.has("actorName")) await db.execute(sql`ALTER TABLE "admin_audit_log" ADD COLUMN "actorName" varchar(255)`);
+      if (!auditColumns.has("action")) await db.execute(sql`ALTER TABLE "admin_audit_log" ADD COLUMN "action" varchar(100)`);
+      if (!auditColumns.has("targetUserId")) await db.execute(sql`ALTER TABLE "admin_audit_log" ADD COLUMN "targetUserId" integer`);
+      if (!auditColumns.has("targetUserName")) await db.execute(sql`ALTER TABLE "admin_audit_log" ADD COLUMN "targetUserName" varchar(255)`);
+      if (!auditColumns.has("targetPostId")) await db.execute(sql`ALTER TABLE "admin_audit_log" ADD COLUMN "targetPostId" integer`);
+      if (!auditColumns.has("metadata")) await db.execute(sql`ALTER TABLE "admin_audit_log" ADD COLUMN "metadata" text`);
+      if (!auditColumns.has("createdAt")) await db.execute(sql`ALTER TABLE "admin_audit_log" ADD COLUMN "createdAt" timestamp DEFAULT now()`);
+    }
+
+    // Some old deployments contain an obsolete required emoji field. Current
+    // reactions use the typed reaction enum, so allowing NULL restores the
+    // canonical write shape without discarding any prior reaction data.
+    if (await relationExists("post_reactions")) {
+      const reactionColumns = await existingColumns("post_reactions");
+      if (reactionColumns.has("emoji")) {
+        await db.execute(sql`ALTER TABLE "post_reactions" ALTER COLUMN "emoji" DROP NOT NULL`);
+      }
+    }
+    console.info("[Database] Legacy runtime schema compatibility check completed.");
+  } catch (error) {
+    // A compatibility failure must be visible, but it must not stop the whole
+    // social application from starting. The corresponding affected feature will
+    // then expose its usual controlled error rather than corrupting data.
+    console.error("[Database] Legacy runtime schema compatibility check failed:", error);
   }
 }
 
@@ -3052,6 +3133,7 @@ export async function getBookmarkCounts(postIds: number[]): Promise<Record<numbe
 // ─── Post Reactions ────────────────────────────────────────────────────────────
 
 type ReactionType = "like" | "love" | "haha" | "wow" | "sad" | "angry" | "seen";
+let didLogReactionEnhancementFallback = false;
 
 export async function setPostReaction(userId: number, postId: number, reaction: ReactionType | null): Promise<void> {
   const db = await getDb();
@@ -3078,7 +3160,14 @@ export async function setPostReaction(userId: number, postId: number, reaction: 
       await db.insert(postReactions).values({ userId, postId, reaction });
     }
   } catch (error) {
-    console.warn("post_reactions sync failed; persisted legacy like instead", { userId, postId, reaction, error });
+    // The legacy likes row has already been persisted above. Keep unexpected
+    // enhancement failures visible once without repeatedly printing a large
+    // database stack trace for every member reaction.
+    if (!didLogReactionEnhancementFallback) {
+      didLogReactionEnhancementFallback = true;
+      const detail = error instanceof Error ? error.message : String(error);
+      console.warn(`[Reactions] Enhanced reaction sync unavailable; legacy likes remain active. ${detail}`);
+    }
   }
 }
 
@@ -3736,31 +3825,31 @@ export async function toggleReelLike(reelId: number, userId: number): Promise<{ 
   if (existing.length > 0) {
     await db.delete(reelLikes).where(and(eq(reelLikes.reelId, reelId), eq(reelLikes.userId, userId)));
     try {
-      await db.update(reels).set({ likeCount: sql`GREATEST(likeCount - 1, 0)` }).where(eq(reels.id, reelId));
+      await db.update(reels).set({ likeCount: sql`GREATEST(${reels.likeCount} - 1, 0)` }).where(eq(reels.id, reelId));
     } catch (err) {
-      console.warn("Warning: Could not update likeCount.", err);
+      console.warn("[Reels] Could not update like count:", err instanceof Error ? err.message : String(err));
     }
     let likeCount = 0;
     try {
       const [updated] = await db.select({ likeCount: reels.likeCount }).from(reels).where(eq(reels.id, reelId));
       likeCount = updated?.likeCount ?? 0;
     } catch (err) {
-      console.warn("Warning: Could not fetch updated likeCount.", err);
+      console.warn("[Reels] Could not read updated like count:", err instanceof Error ? err.message : String(err));
     }
     return { liked: false, likeCount };
   } else {
     await db.insert(reelLikes).values({ reelId, userId });
     try {
-      await db.update(reels).set({ likeCount: sql`likeCount + 1` }).where(eq(reels.id, reelId));
+      await db.update(reels).set({ likeCount: sql`${reels.likeCount} + 1` }).where(eq(reels.id, reelId));
     } catch (err) {
-      console.warn("Warning: Could not update likeCount.", err);
+      console.warn("[Reels] Could not update like count:", err instanceof Error ? err.message : String(err));
     }
     let likeCount = 0;
     try {
       const [updated] = await db.select({ likeCount: reels.likeCount }).from(reels).where(eq(reels.id, reelId));
       likeCount = updated?.likeCount ?? 0;
     } catch (err) {
-      console.warn("Warning: Could not fetch updated likeCount.", err);
+      console.warn("[Reels] Could not read updated like count:", err instanceof Error ? err.message : String(err));
     }
     return { liked: true, likeCount };
   }
