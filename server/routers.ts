@@ -405,6 +405,7 @@ import { compressImage, compressAvatar, compressCover } from "./imageUtils";
 import { notifyOwner } from "./_core/notification";
 import { fetchLinkPreview, extractFirstUrl, countYouTubeUrls, isYouTubeUrl, extractYouTubeVideoId, getYouTubeThumbnailUrl } from "./linkPreview";
 import { sendCallPushNotification, sendDmPushNotification } from "./webpush";
+import { isFacingFaceEventBannerUrl, normaliseEventBannerUrl } from "./eventBannerAccess";
 
 const countWords = (value: string | null | undefined): number => {
   const trimmed = value?.trim();
@@ -4624,6 +4625,7 @@ const eventsRouter = router({
     .input(z.object({
       title: z.string().trim().min(2).max(200),
       description: z.string().trim().max(2_000).optional().nullable(),
+      bannerUrl: z.string().trim().max(1_000).optional().nullable().refine((value) => value == null || isFacingFaceEventBannerUrl(value), { message: "Choose a banner image uploaded to FacingFace." }),
       location: z.string().trim().max(255).optional().nullable(),
       startsAt: z.coerce.date(),
       endsAt: z.coerce.date().optional().nullable(),
@@ -4647,6 +4649,7 @@ const eventsRouter = router({
         organizerId: ctx.user.id,
         title: input.title,
         description: input.description?.trim() || null,
+        bannerUrl: normaliseEventBannerUrl(input.bannerUrl),
         location: input.location?.trim() || null,
         startsAt: input.startsAt,
         endsAt: input.endsAt ?? null,

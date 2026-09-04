@@ -335,6 +335,7 @@ export async function ensureSocialEventStorage(): Promise<boolean> {
         "organizerId" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
         "title" varchar(200) NOT NULL,
         "description" text,
+        "bannerUrl" text,
         "location" varchar(255),
         "startsAt" timestamp NOT NULL,
         "endsAt" timestamp,
@@ -342,6 +343,10 @@ export async function ensureSocialEventStorage(): Promise<boolean> {
         "updatedAt" timestamp DEFAULT now() NOT NULL
       )
     `);
+    const eventColumns = await existingColumns("social_events");
+    if (!eventColumns.has("bannerUrl")) {
+      await db.execute(sql`ALTER TABLE "social_events" ADD COLUMN "bannerUrl" text`);
+    }
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS "social_event_invitations" (
         "id" serial PRIMARY KEY NOT NULL,

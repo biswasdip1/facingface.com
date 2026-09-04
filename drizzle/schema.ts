@@ -283,6 +283,7 @@ export const socialEvents = pgTable("social_events", {
   organizerId: integer("organizerId").notNull(),
   title: varchar("title", { length: 200 }).notNull(),
   description: text("description"),
+  bannerUrl: text("bannerUrl"),
   location: varchar("location", { length: 255 }),
   startsAt: timestamp("startsAt").notNull(),
   endsAt: timestamp("endsAt"),
