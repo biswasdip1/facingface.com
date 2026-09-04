@@ -240,6 +240,7 @@ import {
   isPostBookmarked,
   setPostReaction,
   getPostReactionCounts,
+  getPostReactionSummary,
   getUserPostReaction,
   getUserPostReactions,
   incrementVideoViews,
@@ -1655,9 +1656,9 @@ const postReactionsRouter = router({
   getCounts: protectedProcedure
     .input(z.object({ postId: z.number().int() }))
     .query(async ({ ctx, input }) => {
-      const counts = await getPostReactionCounts(input.postId);
+      const { counts, reactors } = await getPostReactionSummary(input.postId);
       const myReaction = await getUserPostReaction(ctx.user.id, input.postId);
-      return { counts, myReaction };
+      return { counts, reactors: reactors.slice(0, 5), total: reactors.length, myReaction };
     }),
 
   getMyReactions: protectedProcedure

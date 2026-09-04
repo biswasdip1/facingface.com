@@ -338,8 +338,8 @@ function ReelCard({
 
   const likeMutation = trpc.reels.like.useMutation({
     onMutate: () => {
-      setLiked(prev => !prev);
-      setLikeCount(prev => liked ? prev - 1 : prev + 1);
+      setLiked((previous) => !previous);
+      setLikeCount((previous) => liked ? Math.max(0, previous - 1) : previous + 1);
     },
     onError: () => { setLiked(reel.isLiked); setLikeCount(reel.likeCount); },
     onSuccess: (data) => {
@@ -349,6 +349,13 @@ function ReelCard({
       utils.reels.getById.invalidate({ reelId: reel.id });
     },
   });
+
+  // A refetched feed may preserve this component instance. Keep its local
+  // presentation state aligned with the durable result returned by the server.
+  useEffect(() => {
+    setLiked(reel.isLiked);
+    setLikeCount(reel.likeCount);
+  }, [reel.id, reel.isLiked, reel.likeCount]);
 
   const viewMutation = trpc.reels.view.useMutation({
     onSuccess: () => setViewCount(v => v + 1),
@@ -389,6 +396,7 @@ function ReelCard({
 
   const handleLike = () => {
     if (!user) { toast.error("Please sign in to like reels"); return; }
+    if (likeMutation.isPending) return;
     likeMutation.mutate({ reelId: reel.id });
   };
 
@@ -396,7 +404,7 @@ function ReelCard({
     const now = Date.now();
     if (now - lastTapRef.current < 350) {
       // Double-tap detected
-      if (user && !liked) {
+      if (user && !liked && !likeMutation.isPending) {
         setHeartBurst(true);
         setTimeout(() => setHeartBurst(false), 900);
         likeMutation.mutate({ reelId: reel.id });
@@ -405,7 +413,7 @@ function ReelCard({
       }
     }
     lastTapRef.current = now;
-  }, [user, liked, reel.id, likeMutation]);
+  }, [user, liked, reel.id, likeMutation, likeMutation.isPending]);
 
   const handleShare = async () => {
     const url = `${window.location.origin}/reels/${reel.id}`;
@@ -476,7 +484,7 @@ function ReelCard({
 
       {/* Right action bar */}
       <div className="absolute right-3 bottom-20 flex flex-col items-center gap-5">
-        <button onClick={handleLike} className="flex flex-col items-center gap-1">
+        <button onClick={handleLike} disabled={likeMutation.isPending} aria-label={liked ? "Remove Like" : "Like this Reel"} className="flex flex-col items-center gap-1 disabled:opacity-60">
           <div className={`w-11 h-11 rounded-full bg-black/40 flex items-center justify-center transition-transform active:scale-90 ${liked ? "text-red-500" : "text-white"}`}>
             <Heart className={`w-6 h-6 ${liked ? "fill-red-500" : ""}`} />
           </div>

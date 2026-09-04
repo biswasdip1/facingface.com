@@ -1,4 +1,5 @@
 import { orgPagePosts, OrgPagePost, InsertOrgPagePost, commentReactions } from "./../drizzle/schema";
+import { countEffectiveReactions, mergePostReactors, type DurablePostReactor } from "./reactionConsistency";
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, ne, notInArray, sql } from "drizzle-orm";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -231,6 +232,16 @@ async function relationExists(tableName: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+async function existingIndexNames(tableName: string): Promise<Set<string>> {
+  const db = await getDb();
+  if (!db) return new Set();
+  const rows = await db.execute(sql`
+    SELECT indexname FROM pg_indexes
+    WHERE schemaname = 'public' AND tablename = ${tableName}
+  `) as unknown as Array<{ indexname?: string }>;
+  return new Set(rows.map((row) => row.indexname).filter((name): name is string => Boolean(name)));
+}
+
 export async function ensureInactiveReminderStorage(): Promise<boolean> {
   const db = await getDb();
   if (!db) {
@@ -250,11 +261,7 @@ export async function ensureInactiveReminderStorage(): Promise<boolean> {
         )
       `);
     }
-    const indexes = await db.execute(sql`
-      SELECT indexname FROM pg_indexes
-      WHERE schemaname = 'public' AND tablename = 'inactiveUserReminders'
-    `) as unknown as Array<{ indexname?: string }>;
-    const names = new Set(indexes.map((row) => row.indexname));
+    const names = await existingIndexNames("inactiveUserReminders");
     if (!names.has("inactiveUserReminders_userId_idx")) {
       await db.execute(sql`CREATE INDEX "inactiveUserReminders_userId_idx" ON "inactiveUserReminders" ("userId")`);
     }
@@ -309,6 +316,35 @@ export async function ensureLegacyRuntimeSchema(): Promise<void> {
       const reactionColumns = await existingColumns("post_reactions");
       if (reactionColumns.has("emoji")) {
         await db.execute(sql`ALTER TABLE "post_reactions" ALTER COLUMN "emoji" DROP NOT NULL`);
+      }
+      // Retain the newest selected reaction if old concurrent requests created
+      // duplicate rows for the same member and post, then prevent recurrence.
+      await db.execute(sql`
+        DELETE FROM "post_reactions" older
+        USING "post_reactions" newer
+        WHERE older."postId" = newer."postId"
+          AND older."userId" = newer."userId"
+          AND older."id" < newer."id"
+      `);
+      const postReactionIndexes = await existingIndexNames("post_reactions");
+      if (!postReactionIndexes.has("post_reactions_post_user_unique")) {
+        await db.execute(sql`CREATE UNIQUE INDEX "post_reactions_post_user_unique" ON "post_reactions" ("postId", "userId")`);
+      }
+    }
+
+    if (await relationExists("reel_likes")) {
+      // Duplicate rows represent repeated clicks rather than separate people.
+      // Keep one row per member/Reel pair so aggregate counts are dependable.
+      await db.execute(sql`
+        DELETE FROM "reel_likes" older
+        USING "reel_likes" newer
+        WHERE older."reelId" = newer."reelId"
+          AND older."userId" = newer."userId"
+          AND older."id" < newer."id"
+      `);
+      const reelLikeIndexes = await existingIndexNames("reel_likes");
+      if (!reelLikeIndexes.has("reel_likes_reel_user_unique")) {
+        await db.execute(sql`CREATE UNIQUE INDEX "reel_likes_reel_user_unique" ON "reel_likes" ("reelId", "userId")`);
       }
     }
     console.info("[Database] Legacy runtime schema compatibility check completed.");
@@ -3155,9 +3191,13 @@ export async function setPostReaction(userId: number, postId: number, reaction: 
   // or has an older enum on a deployed database, do not fail the Like operation;
   // the legacy likes row above is the source of truth for persistence and counts.
   try {
-    await db.delete(postReactions).where(and(eq(postReactions.userId, userId), eq(postReactions.postId, postId)));
     if (reaction) {
-      await db.insert(postReactions).values({ userId, postId, reaction });
+      await db.insert(postReactions).values({ userId, postId, reaction }).onConflictDoUpdate({
+        target: [postReactions.postId, postReactions.userId],
+        set: { reaction, createdAt: new Date() },
+      });
+    } else {
+      await db.delete(postReactions).where(and(eq(postReactions.userId, userId), eq(postReactions.postId, postId)));
     }
   } catch (error) {
     // The legacy likes row has already been persisted above. Keep unexpected
@@ -3171,37 +3211,58 @@ export async function setPostReaction(userId: number, postId: number, reaction: 
   }
 }
 
-export async function getPostReactionCounts(postId: number): Promise<Record<ReactionType, number>> {
-  const db = await getDb();
-  const empty: Record<ReactionType, number> = { like: 0, love: 0, haha: 0, wow: 0, sad: 0, angry: 0, seen: 0 };
-  if (!db) return empty;
+export type PostReactorSummary = DurablePostReactor;
 
-  // Count one effective reaction per user. The legacy likes table is always
-  // included because it is the durable source used by feeds after refresh.
-  const effectiveByUser = new Map<number, ReactionType>();
+/**
+ * Returns exactly one durable reaction per person. The typed reaction table
+ * takes precedence, while the legacy likes table keeps older production data
+ * visible and counted after a refresh.
+ */
+export async function getEffectivePostReactors(postId: number): Promise<PostReactorSummary[]> {
+  const db = await getDb();
+  if (!db) return [];
+  let enhanced: PostReactorSummary[] = [];
 
   try {
     const reactionRows = await db
-      .select({ userId: postReactions.userId, reaction: postReactions.reaction })
+      .select({
+        userId: postReactions.userId,
+        reaction: postReactions.reaction,
+        name: users.name,
+        avatar: users.avatar,
+      })
       .from(postReactions)
-      .where(eq(postReactions.postId, postId));
-    for (const row of reactionRows) effectiveByUser.set(row.userId, row.reaction as ReactionType);
+      .innerJoin(users, eq(postReactions.userId, users.id))
+      .where(eq(postReactions.postId, postId))
+      .orderBy(desc(postReactions.createdAt), desc(postReactions.id));
+    enhanced = reactionRows.map((row) => ({
+      userId: row.userId,
+      name: row.name,
+      avatar: row.avatar,
+      reaction: row.reaction as ReactionType,
+    }));
   } catch (error) {
-    console.warn("post_reactions count read failed; using legacy likes only", { postId, error });
+    const detail = error instanceof Error ? error.message : String(error);
+    console.warn(`[Reactions] Could not read enhanced reactions; using durable Likes. ${detail}`);
   }
 
   const legacyLikeRows = await db
-    .select({ userId: likes.userId })
+    .select({ userId: likes.userId, name: users.name, avatar: users.avatar })
     .from(likes)
+    .innerJoin(users, eq(likes.userId, users.id))
     .where(and(eq(likes.targetId, postId), eq(likes.targetType, "post")));
-  for (const row of legacyLikeRows) {
-    if (!effectiveByUser.has(row.userId)) effectiveByUser.set(row.userId, "like");
-  }
+  return mergePostReactors(enhanced, legacyLikeRows);
+}
 
-  for (const reaction of Array.from(effectiveByUser.values())) {
-    empty[reaction] = (empty[reaction] ?? 0) + 1;
-  }
-  return empty;
+export async function getPostReactionCounts(postId: number): Promise<Record<ReactionType, number>> {
+  const reactors = await getEffectivePostReactors(postId);
+  return countEffectiveReactions(reactors) as Record<ReactionType, number>;
+}
+
+export async function getPostReactionSummary(postId: number): Promise<{ counts: Record<ReactionType, number>; reactors: PostReactorSummary[] }> {
+  const reactors = await getEffectivePostReactors(postId);
+  const counts = countEffectiveReactions(reactors) as Record<ReactionType, number>;
+  return { counts, reactors };
 }
 
 export async function getUserPostReaction(userId: number, postId: number): Promise<ReactionType | null> {
@@ -3770,6 +3831,22 @@ export async function createReel(data: {
   return result?.id ?? 0;
 }
 
+async function getReelLikeCounts(reelIds: number[]): Promise<Record<number, number>> {
+  const db = await getDb();
+  if (!db || reelIds.length === 0) return {};
+  const rows = await db
+    .select({ reelId: reelLikes.reelId, count: sql<number>`count(*)` })
+    .from(reelLikes)
+    .where(inArray(reelLikes.reelId, reelIds))
+    .groupBy(reelLikes.reelId);
+  return Object.fromEntries(rows.map((row) => [row.reelId, Number(row.count)]));
+}
+
+async function getReelLikeCount(reelId: number): Promise<number> {
+  const counts = await getReelLikeCounts([reelId]);
+  return counts[reelId] ?? 0;
+}
+
 export async function getReelsFeed(
   limit: number,
   cursor: number | null,
@@ -3800,17 +3877,21 @@ export async function getReelsFeed(
 
   if (!rows.length) return [];
 
-  let likedIds = new Set<number>();
-  if (viewerUserId) {
-    const reelIds = rows.map(r => r.id);
-    const likesRows = await db
-      .select({ reelId: reelLikes.reelId })
-      .from(reelLikes)
-      .where(and(eq(reelLikes.userId, viewerUserId), inArray(reelLikes.reelId, reelIds)));
-    likedIds = new Set(likesRows.map(l => l.reelId));
-  }
+  const reelIds = rows.map((row) => row.id);
+  const countPromise = getReelLikeCounts(reelIds);
+  const viewerLikesPromise = viewerUserId
+    ? db.select({ reelId: reelLikes.reelId }).from(reelLikes)
+      .where(and(eq(reelLikes.userId, viewerUserId), inArray(reelLikes.reelId, reelIds)))
+    : Promise.resolve([] as Array<{ reelId: number }>);
+  const [likeCounts, viewerLikes] = await Promise.all([countPromise, viewerLikesPromise]);
+  const likedIds = new Set(viewerLikes.map((row) => row.reelId));
 
-  return rows.map(r => ({ ...r, isVerified: r.isVerified ?? false, isLiked: likedIds.has(r.id) }));
+  return rows.map((row) => ({
+    ...row,
+    likeCount: likeCounts[row.id] ?? 0,
+    isVerified: row.isVerified ?? false,
+    isLiked: likedIds.has(row.id),
+  }));
 }
 
 export async function toggleReelLike(reelId: number, userId: number): Promise<{ liked: boolean; likeCount: number }> {
@@ -3824,35 +3905,22 @@ export async function toggleReelLike(reelId: number, userId: number): Promise<{ 
 
   if (existing.length > 0) {
     await db.delete(reelLikes).where(and(eq(reelLikes.reelId, reelId), eq(reelLikes.userId, userId)));
-    try {
-      await db.update(reels).set({ likeCount: sql`GREATEST(${reels.likeCount} - 1, 0)` }).where(eq(reels.id, reelId));
-    } catch (err) {
-      console.warn("[Reels] Could not update like count:", err instanceof Error ? err.message : String(err));
-    }
-    let likeCount = 0;
-    try {
-      const [updated] = await db.select({ likeCount: reels.likeCount }).from(reels).where(eq(reels.id, reelId));
-      likeCount = updated?.likeCount ?? 0;
-    } catch (err) {
-      console.warn("[Reels] Could not read updated like count:", err instanceof Error ? err.message : String(err));
-    }
+    const likeCount = await getReelLikeCount(reelId);
+    // Keep the older reels.likeCount display field in sync, but always return
+    // the authoritative count from reel_likes so a stale legacy column cannot
+    // make the user interface incorrect.
+    await db.update(reels).set({ likeCount }).where(eq(reels.id, reelId));
     return { liked: false, likeCount };
-  } else {
-    await db.insert(reelLikes).values({ reelId, userId });
-    try {
-      await db.update(reels).set({ likeCount: sql`${reels.likeCount} + 1` }).where(eq(reels.id, reelId));
-    } catch (err) {
-      console.warn("[Reels] Could not update like count:", err instanceof Error ? err.message : String(err));
-    }
-    let likeCount = 0;
-    try {
-      const [updated] = await db.select({ likeCount: reels.likeCount }).from(reels).where(eq(reels.id, reelId));
-      likeCount = updated?.likeCount ?? 0;
-    } catch (err) {
-      console.warn("[Reels] Could not read updated like count:", err instanceof Error ? err.message : String(err));
-    }
-    return { liked: true, likeCount };
   }
+
+  await db.insert(reelLikes).values({ reelId, userId }).onConflictDoNothing({
+    target: [reelLikes.reelId, reelLikes.userId],
+  });
+  const userLike = await db.select({ id: reelLikes.id }).from(reelLikes)
+    .where(and(eq(reelLikes.reelId, reelId), eq(reelLikes.userId, userId))).limit(1);
+  const likeCount = await getReelLikeCount(reelId);
+  await db.update(reels).set({ likeCount }).where(eq(reels.id, reelId));
+  return { liked: userLike.length > 0, likeCount };
 }
 
 export async function recordReelView(reelId: number, userId: number): Promise<void> {
@@ -3865,7 +3933,7 @@ export async function recordReelView(reelId: number, userId: number): Promise<vo
     .limit(1);
   if (existing.length === 0) {
     await db.insert(reelViews).values({ reelId, userId });
-    await db.update(reels).set({ viewCount: sql`viewCount + 1` }).where(eq(reels.id, reelId));
+    await db.update(reels).set({ viewCount: sql`${reels.viewCount} + 1` }).where(eq(reels.id, reelId));
   }
 }
 
@@ -3874,7 +3942,7 @@ export async function addReelComment(reelId: number, authorId: number, content: 
   if (!db) throw new Error("Database not available");
   const results = await db.insert(reelComments).values({ reelId, authorId, content }).returning({ id: reelComments.id });
   try {
-    await db.update(reels).set({ commentCount: sql`commentCount + 1` }).where(eq(reels.id, reelId));
+    await db.update(reels).set({ commentCount: sql`${reels.commentCount} + 1` }).where(eq(reels.id, reelId));
   } catch (err) {
     console.warn("Warning: Could not update commentCount. The column may not exist.", err);
   }
@@ -3936,7 +4004,8 @@ export async function getReelById(
       .where(and(eq(reelLikes.reelId, reelId), eq(reelLikes.userId, viewerUserId))).limit(1);
     isLiked = lk.length > 0;
   }
-  return { ...r, isVerified: r.isVerified ?? false, isLiked };
+  const likeCount = await getReelLikeCount(reelId);
+  return { ...r, likeCount, isVerified: r.isVerified ?? false, isLiked };
 }
 
 export async function getFollowingReelsFeed(
@@ -3972,12 +4041,18 @@ export async function getFollowingReelsFeed(
     .limit(limit);
   if (!rows.length) return [];
   const reelIds = rows.map(r => r.id);
-  const likesRows = await db
-    .select({ reelId: reelLikes.reelId })
-    .from(reelLikes)
-    .where(and(eq(reelLikes.userId, viewerUserId), inArray(reelLikes.reelId, reelIds)));
-  const likedIds = new Set(likesRows.map(l => l.reelId));
-  return rows.map(r => ({ ...r, isVerified: r.isVerified ?? false, isLiked: likedIds.has(r.id) }));
+  const [likesRows, likeCounts] = await Promise.all([
+    db.select({ reelId: reelLikes.reelId }).from(reelLikes)
+      .where(and(eq(reelLikes.userId, viewerUserId), inArray(reelLikes.reelId, reelIds))),
+    getReelLikeCounts(reelIds),
+  ]);
+  const likedIds = new Set(likesRows.map((row) => row.reelId));
+  return rows.map((row) => ({
+    ...row,
+    likeCount: likeCounts[row.id] ?? 0,
+    isVerified: row.isVerified ?? false,
+    isLiked: likedIds.has(row.id),
+  }));
 }
 
 export async function getReelHashtags(): Promise<string[]> {

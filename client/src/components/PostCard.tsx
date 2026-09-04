@@ -612,13 +612,15 @@ function PostReactionSummary({ postId }: { postId: number }) {
   const entries = Object.entries(counts)
     .filter(([, v]) => v > 0)
     .sort(([typeA, countA], [typeB, countB]) => countB - countA || reactionOrder.indexOf(typeA) - reactionOrder.indexOf(typeB));
-  const total = entries.reduce((sum, [, v]) => sum + v, 0);
+  const calculatedTotal = entries.reduce((sum, [, v]) => sum + v, 0);
+  const total = data?.total ?? calculatedTotal;
   const topEntries = entries.slice(0, 3);
+  const reactors = data?.reactors ?? [];
 
   if (total === 0) return null;
 
   return (
-    <div className="flex items-center gap-1.5 mr-2">
+    <div className="flex items-center gap-1.5 mr-2 min-w-0">
       <div className="flex items-center" aria-label={`${total.toLocaleString()} reactions`}>
         {topEntries.map(([type], i) => (
           <span
@@ -631,6 +633,23 @@ function PostReactionSummary({ postId }: { postId: number }) {
           </span>
         ))}
       </div>
+      {reactors.length > 0 && (
+        <div className="flex items-center pl-0.5" aria-label={`Recent people who reacted: ${reactors.map((reactor) => reactor.name ?? "Member").join(", ")}`}>
+          {reactors.map((reactor, i) => {
+            const initial = (reactor.name?.trim().charAt(0) || "?").toUpperCase();
+            return (
+              <span
+                key={reactor.userId}
+                title={`${reactor.name ?? "Member"} reacted ${REACTION_EMOJI_MAP[reactor.reaction] ?? ""}`.trim()}
+                className="inline-flex items-center justify-center w-5 h-5 rounded-full overflow-hidden border-2 border-background bg-muted text-[8px] font-bold text-muted-foreground"
+                style={{ marginLeft: i > 0 ? "-6px" : 0, zIndex: 5 - i }}
+              >
+                {reactor.avatar ? <img src={reactor.avatar} alt="" className="w-full h-full object-cover" /> : initial}
+              </span>
+            );
+          })}
+        </div>
+      )}
       <span className="text-[10px] font-bold text-muted-foreground tabular-nums">{total.toLocaleString()}</span>
     </div>
   );
