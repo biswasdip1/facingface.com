@@ -679,7 +679,7 @@ export type InsertPublicGroupPostComment = typeof publicGroupPostComments.$infer
 
 // Public Group interactions are deliberately separate from the legacy generic
 // emoji reaction enum so older production databases can save Group reactions.
-export const publicGroupPostReactions = pgTable("public_group_post_reactions", {
+export const publicGroupPostReactions = pgTable("public_group_post_reaction_records", {
   id: serial("id").primaryKey(),
   groupPostId: integer("groupPostId").notNull(),
   userId: integer("userId").notNull(),
@@ -689,7 +689,7 @@ export const publicGroupPostReactions = pgTable("public_group_post_reactions", {
 export type PublicGroupPostReaction = typeof publicGroupPostReactions.$inferSelect;
 export type InsertPublicGroupPostReaction = typeof publicGroupPostReactions.$inferInsert;
 
-export const publicGroupPostSaves = pgTable("public_group_post_saves", {
+export const publicGroupPostSaves = pgTable("public_group_post_saved_records", {
   id: serial("id").primaryKey(),
   groupPostId: integer("groupPostId").notNull(),
   userId: integer("userId").notNull(),

@@ -282,43 +282,34 @@ export async function ensurePublicGroupInteractionStorage(): Promise<boolean> {
   if (!db) return false;
   if (publicGroupInteractionStorageReady) return true;
   try {
+    // The first release used a partially compatible legacy table name. The v2
+    // records below are purpose-built for Public Group actions and use no enum.
+    // They can therefore be created safely on the existing Render database.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "public_group_post_reaction_records" (
+        "id" serial PRIMARY KEY NOT NULL,
+        "groupPostId" integer NOT NULL,
+        "userId" integer NOT NULL,
+        "reaction" varchar(12) NOT NULL,
+        "createdAt" timestamp DEFAULT now() NOT NULL
+      )
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "public_group_post_saved_records" (
+        "id" serial PRIMARY KEY NOT NULL,
+        "groupPostId" integer NOT NULL,
+        "userId" integer NOT NULL,
+        "createdAt" timestamp DEFAULT now() NOT NULL
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "public_group_reaction_record_member_idx" ON "public_group_post_reaction_records" ("groupPostId", "userId")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "public_group_reaction_record_recent_idx" ON "public_group_post_reaction_records" ("groupPostId", "createdAt" DESC)`);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "public_group_saved_record_member_idx" ON "public_group_post_saved_records" ("groupPostId", "userId")`);
     if (await relationExists("public_group_posts")) {
       const columns = await existingColumns("public_group_posts");
       if (!columns.has("resharedFromId")) {
         await db.execute(sql`ALTER TABLE "public_group_posts" ADD COLUMN "resharedFromId" integer`);
       }
-    }
-    if (!(await relationExists("public_group_post_reactions"))) {
-      await db.execute(sql`
-        CREATE TABLE "public_group_post_reactions" (
-          "id" serial PRIMARY KEY NOT NULL,
-          "groupPostId" integer NOT NULL,
-          "userId" integer NOT NULL,
-          "reaction" varchar(12) NOT NULL,
-          "createdAt" timestamp DEFAULT now() NOT NULL
-        )
-      `);
-    }
-    if (!(await relationExists("public_group_post_saves"))) {
-      await db.execute(sql`
-        CREATE TABLE "public_group_post_saves" (
-          "id" serial PRIMARY KEY NOT NULL,
-          "groupPostId" integer NOT NULL,
-          "userId" integer NOT NULL,
-          "createdAt" timestamp DEFAULT now() NOT NULL
-        )
-      `);
-    }
-    const reactionIndexes = await existingIndexNames("public_group_post_reactions");
-    if (!reactionIndexes.has("public_group_post_reactions_member_idx")) {
-      await db.execute(sql`CREATE UNIQUE INDEX "public_group_post_reactions_member_idx" ON "public_group_post_reactions" ("groupPostId", "userId")`);
-    }
-    if (!reactionIndexes.has("public_group_post_reactions_recent_idx")) {
-      await db.execute(sql`CREATE INDEX "public_group_post_reactions_recent_idx" ON "public_group_post_reactions" ("groupPostId", "createdAt" DESC)`);
-    }
-    const saveIndexes = await existingIndexNames("public_group_post_saves");
-    if (!saveIndexes.has("public_group_post_saves_member_idx")) {
-      await db.execute(sql`CREATE UNIQUE INDEX "public_group_post_saves_member_idx" ON "public_group_post_saves" ("groupPostId", "userId")`);
     }
     publicGroupInteractionStorageReady = true;
     return true;
