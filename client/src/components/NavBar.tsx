@@ -297,11 +297,11 @@ export default function NavBar() {
     { href: "/saved",                          label: "Saved",         icon: Bookmark },
     { href: "/scheduled",                      label: "Scheduled",     icon: CalendarClock },
     { href: "/trending",                       label: "Trending",      icon: TrendingUp },
-    ...(canAccessAdmin ? [{ href: "/admin", label: isSuperAdmin ? "Super Admin" : "Admin", icon: Shield, superAdmin: isSuperAdmin }] : []),
+
   ];
 
   // Shared dropdown content (used by both mobile profile tap and desktop gear)
-  const DropdownMenu = ({ alignLeft }: { alignLeft?: boolean }) => (
+  const DropdownMenu = ({ alignLeft, showSignOut = true }: { alignLeft?: boolean; showSignOut?: boolean }) => (
     <div
       className="absolute top-full mt-1 border shadow-lg z-50 min-w-[240px]"
       style={{
@@ -313,9 +313,9 @@ export default function NavBar() {
         borderColor: "var(--its-border)",
       }}
     >
-      {/* Sign Out — prominent red button at top */}
-      <button
-        onClick={() => { logout(); setDropdownOpen(false); }}
+      {/* Mobile keeps Sign Out in the account flyout; desktop shows it in the header. */}
+      {showSignOut && <button
+        onClick={() => { void logout(); setDropdownOpen(false); }}
         className="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-bold text-left transition-colors border-b"
         aria-label="Sign out"
         style={{
@@ -328,7 +328,7 @@ export default function NavBar() {
       >
         <LogOut size={16} />
         Sign Out
-      </button>
+      </button>}
 
       {/* My Account — second item */}
       {user && (
@@ -926,7 +926,7 @@ export default function NavBar() {
         </div>
 
         {/* Desktop Nav icons */}
-        <nav className="hidden sm:flex items-center gap-0">
+        <nav className="hidden sm:flex items-center gap-0 flex-1 min-w-0 overflow-x-auto scrollbar-none">
           {navItems.map(({ href, label, icon: Icon, superAdmin }) => {
             const isActive =
               href === "/" ? location === "/" : location.startsWith(href.split("?")[0]);
@@ -993,28 +993,49 @@ export default function NavBar() {
           })}
         </nav>
 
-        {/* Desktop Right: Settings gear dropdown */}
-        <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
+        {/* Desktop Right: account controls stay visible together at the far right. */}
+        <div className="hidden sm:flex items-center gap-1.5 flex-shrink-0 pl-2" aria-label="Account controls">
+          {canAccessAdmin && (
+            <Link
+              href="/admin"
+              title="Open Admin panel"
+              className="h-9 inline-flex items-center gap-1.5 px-2.5 rounded text-[10px] font-bold uppercase tracking-wide no-underline transition-colors"
+              style={{ color: "#b45309", backgroundColor: "rgba(245, 158, 11, 0.12)", border: "1px solid rgba(245, 158, 11, 0.32)" }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(245, 158, 11, 0.22)")}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "rgba(245, 158, 11, 0.12)")}
+            >
+              <Shield size={15} strokeWidth={2.2} /> {isSuperAdmin ? "Admin" : "Admin"}
+            </Link>
+          )}
           {user && (
-            <div ref={dropdownRef} className="relative">
+            <>
+              <div ref={dropdownRef} className="relative">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setDropdownOpen((v) => !v); }}
+                  title="Settings"
+                  aria-label="Open settings menu"
+                  aria-expanded={dropdownOpen}
+                  className="w-9 h-9 flex items-center justify-center rounded-full border transition-colors"
+                  style={{ borderColor: "var(--its-border)", color: "var(--its-text-muted)", backgroundColor: "transparent" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--its-border)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                >
+                  <Settings size={18} strokeWidth={1.8} />
+                </button>
+                {dropdownOpen && <DropdownMenu showSignOut={false} />}
+              </div>
               <button
-                onClick={(e) => { e.stopPropagation(); setDropdownOpen((v) => !v); }}
-                title="More"
-                aria-label="Open settings menu"
-                aria-expanded={dropdownOpen}
-                className="w-9 h-9 flex items-center justify-center rounded-full border transition-colors"
-                style={{
-                  borderColor: "var(--its-border)",
-                  color: "var(--its-text-muted)",
-                  backgroundColor: "transparent",
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--its-border)")}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                onClick={() => { void logout(); }}
+                className="h-9 inline-flex items-center gap-1.5 px-2.5 rounded text-xs font-bold transition-colors"
+                style={{ backgroundColor: "var(--its-red)", color: "#fff" }}
+                title="Sign out"
+                aria-label="Sign out"
+                onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.88"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
               >
-                <Settings size={18} strokeWidth={1.8} />
+                <LogOut size={15} /><span className="hidden md:inline">Sign Out</span>
               </button>
-              {dropdownOpen && <DropdownMenu />}
-            </div>
+            </>
           )}
         </div>
 
