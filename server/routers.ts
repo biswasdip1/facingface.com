@@ -114,6 +114,7 @@ import {
   getFlaggedPosts,
   getFlaggedComments,
   getAllUsers,
+  getAdminPosts,
   unsuspendUser,
   setUserRole,
   unflagPost,
@@ -2080,9 +2081,18 @@ const adminRouter = router({
       return { success: true };
     }),
   allUsers: adminProcedure
+    .input(z.object({ limit: z.number().default(100), offset: z.number().default(0), suspendedOnly: z.boolean().default(false) }))
+    .query(async ({ input }) => {
+      return getAllUsers(input.limit, input.offset, input.suspendedOnly);
+    }),
+  allPosts: adminProcedure
     .input(z.object({ limit: z.number().default(100), offset: z.number().default(0) }))
     .query(async ({ input }) => {
-      return getAllUsers(input.limit, input.offset);
+      const postRows = await getAdminPosts(input.limit, input.offset);
+      const authorIds = Array.from(new Set(postRows.map((post) => post.authorId)));
+      const authorRows = await Promise.all(authorIds.map((id) => getUserById(id)));
+      const authors = Object.fromEntries(authorRows.filter(Boolean).map((author) => [author!.id, { name: author!.name, avatar: author!.avatar }]));
+      return { posts: postRows, authors };
     }),
   suspendUser: adminProcedure
     .input(z.object({ userId: z.number(), days: z.number().min(1).max(365), reason: z.string() }))

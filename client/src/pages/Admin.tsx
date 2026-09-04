@@ -31,12 +31,14 @@ type Tab =
   | "email_notice"
   | "people_you_may_know"
   | "email_reminders"
-  | "system_resources";
+  | "system_resources"
+  | "posts";
 
 export default function Admin() {
   const { user, loading } = useAuth();
   const [, navigate] = useLocation();
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [userViewFilter, setUserViewFilter] = useState<"all" | "suspended">("all");
   const [expandedPost, setExpandedPost] = useState<number | null>(null);
   const [suspendUserId, setSuspendUserId] = useState<number | null>(null);
   const [suspendDays, setSuspendDays] = useState(7);
@@ -89,6 +91,7 @@ export default function Admin() {
     { id: "flagged", label: "Flagged Posts", icon: Flag },
     { id: "reports", label: "Reports", icon: MessageSquareWarning },
     { id: "users", label: "Users", icon: Users },
+    { id: "posts", label: "All Posts", icon: ClipboardList, superOnly: true },
     { id: "pages", label: "Pages", icon: Globe },
     { id: "groups", label: "Public Groups", icon: UsersRound },
     { id: "listings", label: "Buy & Sale Shop", icon: ShoppingBag },
@@ -175,11 +178,20 @@ export default function Admin() {
         </div>
 
         {/* Tab Content */}
-        {activeTab === "overview" && <OverviewTab />}
+        {activeTab === "overview" && <OverviewTab onNavigate={(destination) => {
+          if (destination === "users" || destination === "suspended") {
+            setUserViewFilter(destination === "suspended" ? "suspended" : "all");
+            setActiveTab("users");
+          } else {
+            setActiveTab(destination);
+          }
+        }} />}
         {activeTab === "flagged" && <FlaggedTab expandedPost={expandedPost} setExpandedPost={setExpandedPost} />}
         {activeTab === "reports" && <ReportsTab />}
+        {activeTab === "posts" && <AllPostsTab />}
         {activeTab === "users" && (
           <UsersTab
+            initialFilter={userViewFilter}
             suspendUserId={suspendUserId}
             setSuspendUserId={setSuspendUserId}
             suspendDays={suspendDays}
@@ -218,23 +230,46 @@ export default function Admin() {
 }
 
 // ─── Overview Tab ─────────────────────────────────────────────────────────────
-function OverviewTab() {
+function OverviewTab({ onNavigate }: { onNavigate: (destination: "users" | "posts" | "flagged" | "suspended") => void }) {
   const { data: stats, isLoading } = trpc.admin.stats.useQuery();
   if (isLoading) return <LoadingSpinner />;
-  const cards = [
-    { label: "Total Users", value: stats?.totalUsers ?? 0, color: "#3b82f6" },
-    { label: "Total Posts", value: stats?.totalPosts ?? 0, color: "#10b981" },
-    { label: "Flagged Posts", value: stats?.flaggedPosts ?? 0, color: "#f59e0b" },
-    { label: "Suspended Users", value: stats?.suspendedUsers ?? 0, color: "#ef4444" },
+  const cards: Array<{ label: string; value: number; color: string; destination: "users" | "posts" | "flagged" | "suspended"; detail: string }> = [
+    { label: "Total Users", value: stats?.totalUsers ?? 0, color: "#3b82f6", destination: "users", detail: "Open all user accounts" },
+    { label: "Total Posts", value: stats?.totalPosts ?? 0, color: "#10b981", destination: "posts", detail: "Open all posts" },
+    { label: "Flagged Posts", value: stats?.flaggedPosts ?? 0, color: "#f59e0b", destination: "flagged", detail: "Open flagged-content queue" },
+    { label: "Suspended Users", value: stats?.suspendedUsers ?? 0, color: "#ef4444", destination: "suspended", detail: "Open active suspensions" },
   ];
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-      {cards.map(({ label, value, color }) => (
-        <div key={label} className="rounded-lg p-5 border" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }}>
+      {cards.map(({ label, value, color, destination, detail }) => (
+        <button key={label} onClick={() => onNavigate(destination)} className="rounded-lg p-5 border text-left transition-transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-blue-500" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }} title={detail}>
           <div className="text-3xl font-bold mb-1" style={{ color }}>{value}</div>
           <div className="text-sm" style={{ color: "var(--its-text-muted)" }}>{label}</div>
-        </div>
+          <div className="text-xs mt-2" style={{ color }}>View →</div>
+        </button>
       ))}
+    </div>
+  );
+}
+
+// ─── All Posts Tab (super_admin) ──────────────────────────────────────────────
+function AllPostsTab() {
+  const { data, isLoading } = trpc.admin.allPosts.useQuery({ limit: 1000, offset: 0 });
+  if (isLoading) return <LoadingSpinner />;
+  if (!data?.posts.length) return <EmptyState icon={ClipboardList} message="No posts at this time." />;
+
+  return (
+    <div className="rounded-lg border overflow-hidden" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }}>
+      <div className="p-4 border-b" style={{ borderColor: "var(--its-border)" }}>
+        <h2 className="text-lg font-bold">All Posts</h2>
+        <p className="text-sm mt-1" style={{ color: "var(--its-text-muted)" }}>Showing {data.posts.length} most recent posts. Use Flagged Posts or Reports for moderation actions.</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: "1px solid var(--its-border)" }}><th className="text-left py-3 px-4 text-xs">Post</th><th className="text-left py-3 px-4 text-xs">Author</th><th className="text-left py-3 px-4 text-xs">Created</th><th className="text-left py-3 px-4 text-xs">Type</th><th className="text-left py-3 px-4 text-xs">Status</th><th className="text-right py-3 px-4 text-xs">View</th></tr></thead>
+          <tbody>{data.posts.map((post) => <tr key={post.id} style={{ borderBottom: "1px solid var(--its-border)" }}><td className="py-3 px-4 max-w-xs"><div className="font-medium">#{post.id}</div><div className="text-xs truncate max-w-xs" style={{ color: "var(--its-text-muted)" }}>{post.text ?? "(media-only post)"}</div></td><td className="py-3 px-4">{data.authors[post.authorId]?.name ?? `User #${post.authorId}`}</td><td className="py-3 px-4 text-xs">{new Date(post.createdAt).toLocaleString()}</td><td className="py-3 px-4 capitalize">{post.mediaType ?? (post.docUrl ? "document" : post.audioUrl ? "audio" : "text")}</td><td className="py-3 px-4">{post.isFlagged ? <span className="px-2 py-0.5 rounded-full text-xs" style={{ backgroundColor: "#fef3c7", color: "#92400e" }}>Flagged</span> : <span className="px-2 py-0.5 rounded-full text-xs" style={{ backgroundColor: "#d1fae5", color: "#065f46" }}>Visible</span>}</td><td className="py-3 px-4 text-right"><a href={`/post/${post.id}`} target="_blank" rel="noreferrer" className="inline-flex p-1.5 rounded" style={{ color: "#2563eb" }} title="View post"><Eye size={16} /></a></td></tr>)}</tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -284,7 +319,7 @@ function SystemResourcesTab({ openUsers }: { openUsers: () => void }) {
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             <ResourceMetric icon={HardDrive} label="Persistent disk" value={disk?.available ? `${formatResourceBytes(disk.usedBytes)} / ${formatResourceBytes(disk.capacityBytes)}` : "Unavailable"} detail={disk?.available ? `${disk.fileCount} stored media files` : disk?.error ?? "Attach the Render disk at /var/data"} color={diskColor} />
-            <ResourceMetric icon={Activity} label="Disk capacity used" value={diskPercent === null ? "—" : `${diskPercent}%`} detail={disk?.freeBytes === null ? "Not available" : `${formatResourceBytes(disk.freeBytes)} free`} color={diskColor} />
+            <ResourceMetric icon={Activity} label="Disk capacity used" value={diskPercent === null ? "—" : `${diskPercent}%`} detail={disk?.freeBytes == null ? "Not available" : `${formatResourceBytes(disk.freeBytes)} free`} color={diskColor} />
             <ResourceMetric icon={Eye} label="Media delivery" value={String(delivery?.requests ?? 0)} detail={`${formatResourceBytes(delivery?.bytesServed)} served since this web process started`} color="#2563eb" />
             <ResourceMetric icon={AlertTriangle} label="Media path misses" value={String(delivery?.notFoundResponses ?? 0)} detail="404 or legacy 410 media responses since process start" color={(delivery?.notFoundResponses ?? 0) > 0 ? "#d97706" : "#059669"} />
           </div>
@@ -655,8 +690,9 @@ function ReportsTab() {
 
 // ─── Users Tab ────────────────────────────────────────────────────────────────
 function UsersTab({
-  suspendUserId, setSuspendUserId, suspendDays, setSuspendDays, suspendReason, setSuspendReason, isSuperAdmin,
+  initialFilter, suspendUserId, setSuspendUserId, suspendDays, setSuspendDays, suspendReason, setSuspendReason, isSuperAdmin,
 }: {
+  initialFilter: "all" | "suspended";
   suspendUserId: number | null;
   setSuspendUserId: (id: number | null) => void;
   suspendDays: number;
@@ -667,6 +703,7 @@ function UsersTab({
 }) {
   const utils = trpc.useUtils();
   const [search, setSearch] = useState("");
+  const [viewFilter, setViewFilter] = useState<"all" | "suspended">(initialFilter);
   const [currentPage, setCurrentPage] = useState(1);
   const [usersPerPage, setUsersPerPage] = useState(200);
   const [loadAll, setLoadAll] = useState(false);
@@ -676,10 +713,14 @@ function UsersTab({
   // Reset to page 1 when search changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [search]);
+  }, [search, viewFilter]);
+
+  useEffect(() => {
+    setViewFilter(initialFilter);
+  }, [initialFilter]);
 
   const offset = (currentPage - 1) * usersPerPage;
-  const { data: users, isLoading } = trpc.admin.allUsers.useQuery({ limit: loadAll ? 10000 : usersPerPage, offset: loadAll ? 0 : offset });
+  const { data: users, isLoading } = trpc.admin.allUsers.useQuery({ limit: loadAll ? 10000 : usersPerPage, offset: loadAll ? 0 : offset, suspendedOnly: viewFilter === "suspended" });
   const suspendMutation = trpc.admin.suspendUser.useMutation({
     onSuccess: () => { utils.admin.allUsers.invalidate(); setSuspendUserId(null); toast.success("User suspended."); },
   });
@@ -789,6 +830,11 @@ function UsersTab({
       )}
 
       {/* Search and Pagination Controls */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <button onClick={() => setViewFilter("all")} className="px-3 py-1.5 rounded text-xs font-medium" style={{ backgroundColor: viewFilter === "all" ? "#2563eb" : "var(--its-border)", color: viewFilter === "all" ? "white" : "var(--its-text-muted)" }}>All Users</button>
+        <button onClick={() => setViewFilter("suspended")} className="px-3 py-1.5 rounded text-xs font-medium" style={{ backgroundColor: viewFilter === "suspended" ? "#dc2626" : "var(--its-border)", color: viewFilter === "suspended" ? "white" : "var(--its-text-muted)" }}>Active Suspensions</button>
+        {viewFilter === "suspended" && <span className="text-xs" style={{ color: "var(--its-text-muted)" }}>Showing only accounts whose suspension is currently active.</span>}
+      </div>
       <div className="flex items-center gap-4 mb-4">
         <div className="flex items-center gap-2 flex-1 rounded-lg border px-3 py-2" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }}>
           <Search size={16} style={{ color: "var(--its-text-muted)" }} />

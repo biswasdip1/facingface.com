@@ -1660,9 +1660,10 @@ export async function getFlaggedComments(limit = 50, offset = 0) {
   return db.select().from(comments).where(eq(comments.isFlagged, true)).orderBy(desc(comments.createdAt)).limit(limit).offset(offset);
 }
 
-export async function getAllUsers(limit = 100, offset = 0) {
+export async function getAllUsers(limit = 100, offset = 0, suspendedOnly = false) {
   const db = await getDb();
   if (!db) return [];
+  const activeSuspension = gt(users.suspendedUntil, new Date());
   return db.select({
     id: users.id,
     name: users.name,
@@ -1674,7 +1675,18 @@ export async function getAllUsers(limit = 100, offset = 0) {
     suspendedUntil: users.suspendedUntil,
     suspendReason: users.suspendReason,
     createdAt: users.createdAt,
-  }).from(users).orderBy(desc(users.createdAt)).limit(limit).offset(offset);
+  }).from(users)
+    .where(suspendedOnly ? activeSuspension : undefined)
+    .orderBy(desc(users.createdAt))
+    .limit(limit)
+    .offset(offset);
+}
+
+/** Returns recent-to-oldest posts for the super-admin's read-only all-posts review view. */
+export async function getAdminPosts(limit = 100, offset = 0): Promise<Post[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(posts).orderBy(desc(posts.createdAt)).limit(limit).offset(offset);
 }
 
 export async function unsuspendUser(userId: number): Promise<void> {
@@ -1701,7 +1713,7 @@ export async function getAdminStats() {
   const [totalUsersRow] = await db.select({ count: sql<number>`COUNT(*)` }).from(users);
   const [totalPostsRow] = await db.select({ count: sql<number>`COUNT(*)` }).from(posts);
   const [flaggedPostsRow] = await db.select({ count: sql<number>`COUNT(*)` }).from(posts).where(eq(posts.isFlagged, true));
-  const [suspendedUsersRow] = await db.select({ count: sql<number>`COUNT(*)` }).from(users).where(isNotNull(users.suspendedUntil));
+  const [suspendedUsersRow] = await db.select({ count: sql<number>`COUNT(*)` }).from(users).where(gt(users.suspendedUntil, new Date()));
   return {
     totalUsers: Number(totalUsersRow?.count ?? 0),
     totalPosts: Number(totalPostsRow?.count ?? 0),
