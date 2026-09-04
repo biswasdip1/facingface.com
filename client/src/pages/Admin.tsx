@@ -8,7 +8,7 @@ import {
   Trash2, CheckCircle, Ban, UserCheck, BadgeCheck, XCircle, ClipboardList,
   ShoppingBag, Eye, AlertTriangle, FileImage, FileVideo, FileAudio, FileText,
   Globe, UsersRound, MessageSquareWarning, Search, BarChart2, Radio, Newspaper,
-  Mail,
+  Mail, HardDrive, Activity, ExternalLink, RefreshCw, ShieldAlert,
 } from "lucide-react";
 import { BroadcastComposer, BroadcastsList } from "@/components/BroadcastUI";
 import { toast } from "sonner";
@@ -30,7 +30,8 @@ type Tab =
   | "news_feed"
   | "email_notice"
   | "people_you_may_know"
-  | "email_reminders";
+  | "email_reminders"
+  | "system_resources";
 
 export default function Admin() {
   const { user, loading } = useAuth();
@@ -101,6 +102,7 @@ export default function Admin() {
     { id: "email_notice", label: "E-mail/Notice", icon: Mail },
     { id: "people_you_may_know", label: "People You May Know", icon: Users, superOnly: true },
     { id: "email_reminders", label: "Email Reminders", icon: Mail },
+    { id: "system_resources", label: "System Resources", icon: HardDrive, superOnly: true },
   ];
 
   const visibleTabs = tabs.filter((t) => !t.superOnly || isSuperAdmin);
@@ -208,6 +210,7 @@ export default function Admin() {
         )}
         {activeTab === "people_you_may_know" && <PeopleYouMayKnowTab />}
         {activeTab === "email_reminders" && <EmailRemindersTab />}
+        {activeTab === "system_resources" && <SystemResourcesTab openUsers={() => setActiveTab("users")} />}
 
       </div>
     </div>
@@ -234,6 +237,81 @@ function OverviewTab() {
       ))}
     </div>
   );
+}
+
+function formatResourceBytes(value: number | null | undefined): string {
+  const bytes = Number(value ?? 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / (1024 ** index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+// ─── System Resources Tab (super_admin) ───────────────────────────────────────
+function SystemResourcesTab({ openUsers }: { openUsers: () => void }) {
+  const { data, isLoading, error, refetch, isFetching } = trpc.admin.resourceMonitoring.useQuery(undefined, { refetchInterval: 60_000 });
+  if (isLoading) return <LoadingSpinner />;
+
+  const disk = data?.disk;
+  const delivery = data?.delivery;
+  const diskPercent = disk?.diskUsedPercent ?? null;
+  const diskColor = diskPercent !== null && diskPercent >= 90 ? "#dc2626" : diskPercent !== null && diskPercent >= 80 ? "#d97706" : "#059669";
+  const signalLabels: Record<string, string> = {
+    high_activity: `High activity (≥ ${data?.warningThreshold ?? 20} posts / 24h)`,
+    prior_violation: "Prior content violation",
+    active_suspension: "Currently suspended",
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-lg border p-5" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2"><HardDrive size={20} /><h2 className="text-lg font-bold">System Resources & Abuse Control</h2></div>
+            <p className="text-sm mt-1" style={{ color: "var(--its-text-muted)" }}>Measured Render persistent-media storage, media delivery through this web process, and accounts requiring review.</p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => refetch()} disabled={isFetching} className="flex items-center gap-1 px-3 py-2 rounded text-xs font-medium border disabled:opacity-50" style={{ borderColor: "var(--its-border)", color: "var(--its-text-muted)" }}><RefreshCw size={14} className={isFetching ? "animate-spin" : ""} /> Refresh</button>
+            <a href={data?.renderMetricsUrl ?? "https://dashboard.render.com/"} target="_blank" rel="noreferrer" className="flex items-center gap-1 px-3 py-2 rounded text-xs font-medium text-white" style={{ backgroundColor: "#3b82f6" }}><ExternalLink size={14} /> Render Metrics</a>
+          </div>
+        </div>
+        <p className="text-xs mt-3" style={{ color: "var(--its-text-muted)" }}>For total network egress, CPU, memory, restarts, and service availability, use Render Metrics. This panel does not invent values that the application cannot measure.</p>
+      </div>
+
+      {error ? (
+        <div className="rounded-lg border p-4 text-sm" style={{ backgroundColor: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}>Resource monitoring could not load: {error.message}</div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <ResourceMetric icon={HardDrive} label="Persistent disk" value={disk?.available ? `${formatResourceBytes(disk.usedBytes)} / ${formatResourceBytes(disk.capacityBytes)}` : "Unavailable"} detail={disk?.available ? `${disk.fileCount} stored media files` : disk?.error ?? "Attach the Render disk at /var/data"} color={diskColor} />
+            <ResourceMetric icon={Activity} label="Disk capacity used" value={diskPercent === null ? "—" : `${diskPercent}%`} detail={disk?.freeBytes === null ? "Not available" : `${formatResourceBytes(disk.freeBytes)} free`} color={diskColor} />
+            <ResourceMetric icon={Eye} label="Media delivery" value={String(delivery?.requests ?? 0)} detail={`${formatResourceBytes(delivery?.bytesServed)} served since this web process started`} color="#2563eb" />
+            <ResourceMetric icon={AlertTriangle} label="Media path misses" value={String(delivery?.notFoundResponses ?? 0)} detail="404 or legacy 410 media responses since process start" color={(delivery?.notFoundResponses ?? 0) > 0 ? "#d97706" : "#059669"} />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="rounded-lg border p-4" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }}><p className="text-xs font-semibold uppercase" style={{ color: "var(--its-text-muted)" }}>Posts with media/audio</p><p className="text-2xl font-bold mt-1">{data?.records.mediaPosts ?? 0}</p></div>
+            <div className="rounded-lg border p-4" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }}><p className="text-xs font-semibold uppercase" style={{ color: "var(--its-text-muted)" }}>Documents recorded</p><p className="text-2xl font-bold mt-1">{data?.records.documents ?? 0}</p></div>
+            <div className="rounded-lg border p-4" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }}><p className="text-xs font-semibold uppercase" style={{ color: "var(--its-text-muted)" }}>Document bytes recorded</p><p className="text-2xl font-bold mt-1">{formatResourceBytes(data?.records.recordedDocumentBytes)}</p></div>
+          </div>
+
+          <div className="rounded-lg border overflow-hidden" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }}>
+            <div className="p-4 flex flex-wrap items-center justify-between gap-3 border-b" style={{ borderColor: "var(--its-border)" }}>
+              <div><div className="flex items-center gap-2"><ShieldAlert size={18} style={{ color: "#d97706" }} /><h3 className="font-semibold">Accounts Requiring Review</h3></div><p className="text-xs mt-1" style={{ color: "var(--its-text-muted)" }}>Signals do not suspend or delete anyone automatically. Review the account first.</p></div>
+              <button onClick={openUsers} className="px-3 py-2 rounded text-xs font-medium text-white" style={{ backgroundColor: "#374151" }}>Open User Controls</button>
+            </div>
+            {!data?.flaggedAccounts.length ? <EmptyState icon={CheckCircle} message="No accounts currently meet the review signals." /> : (
+              <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr style={{ borderBottom: "1px solid var(--its-border)" }}><th className="text-left py-3 px-4 text-xs">Account</th><th className="text-left py-3 px-4 text-xs">Signals</th><th className="text-right py-3 px-4 text-xs">Posts / 24h</th><th className="text-right py-3 px-4 text-xs">Violations</th><th className="text-left py-3 px-4 text-xs">Status</th></tr></thead><tbody>{data.flaggedAccounts.map((account) => <tr key={account.userId} style={{ borderBottom: "1px solid var(--its-border)" }}><td className="py-3 px-4"><div className="font-medium">{account.name ?? "Unnamed member"}</div><div className="text-xs" style={{ color: "var(--its-text-muted)" }}>{account.email ?? `User #${account.userId}`}</div></td><td className="py-3 px-4"><div className="flex flex-wrap gap-1">{account.signals.map((signal) => <span key={signal} className="px-2 py-0.5 rounded-full text-xs" style={{ backgroundColor: "#fef3c7", color: "#92400e" }}>{signalLabels[signal] ?? signal}</span>)}</div></td><td className="py-3 px-4 text-right">{account.postsLast24Hours}</td><td className="py-3 px-4 text-right">{account.violationCount}</td><td className="py-3 px-4">{account.suspendedUntil && new Date(account.suspendedUntil) > new Date() ? <span style={{ color: "#b91c1c" }}>Suspended</span> : <span style={{ color: "#64748b" }}>Review needed</span>}</td></tr>)}</tbody></table></div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ResourceMetric({ icon: Icon, label, value, detail, color }: { icon: React.ElementType; label: string; value: string; detail: string; color: string }) {
+  return <div className="rounded-lg border p-4" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }}><div className="flex items-center gap-2"><Icon size={17} style={{ color }} /><p className="text-xs font-semibold uppercase" style={{ color: "var(--its-text-muted)" }}>{label}</p></div><p className="text-2xl font-bold mt-3" style={{ color }}>{value}</p><p className="text-xs mt-1" style={{ color: "var(--its-text-muted)" }}>{detail}</p></div>;
 }
 
 // ─── Flagged Posts Tab ────────────────────────────────────────────────────────

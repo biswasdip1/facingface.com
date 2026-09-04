@@ -266,6 +266,8 @@ import {
   adminUpdateShopListing,
   getMediaLimits,
   setMediaLimit,
+  getResourceAbuseSignals,
+  getMediaRecordSummary,
   createContentReport,
   getContentReports,
   getContentReportById,
@@ -354,6 +356,8 @@ import {
 import { generateTotpSecret, buildTotpUri, generateQrCode, verifyTotpCode, generateBackupCodes, consumeBackupCode } from "./totp";
 import { loginLimiter, registerLimiter } from "./rateLimit";
 import { removeReportedContent, wasRecipientAccepted } from "./moderationActions";
+import { getDiskMediaConfig } from "./storage";
+import { getMediaDeliveryStats, getMediaDiskStats } from "./_core/mediaUsage";
 import {
   generateRegistrationOptions,
   verifyRegistrationResponse,
@@ -2175,6 +2179,27 @@ const adminRouter = router({
       await deleteUserAccount(input.userId);
       return { success: true };
     }),
+
+  // ── Measured Render media storage, delivery activity, and account signals ──
+  resourceMonitoring: superAdminProcedure.query(async () => {
+    const warningThreshold = Math.max(1, Number(process.env.ABUSE_POSTS_WARNING_PER_24H ?? 20));
+    const diskConfig = getDiskMediaConfig();
+    const [disk, delivery, records, flaggedAccounts] = await Promise.all([
+      getMediaDiskStats(diskConfig?.directory),
+      Promise.resolve(getMediaDeliveryStats()),
+      getMediaRecordSummary(),
+      getResourceAbuseSignals({ postWarningThreshold: warningThreshold, limit: 50 }),
+    ]);
+    return {
+      measuredAt: new Date().toISOString(),
+      disk,
+      delivery,
+      records,
+      flaggedAccounts,
+      warningThreshold,
+      renderMetricsUrl: "https://dashboard.render.com/",
+    };
+  }),
 
   // ── Media limits ──────────────────────────────────────────────────────────
   getMediaLimits: publicProcedure.query(async () => {

@@ -1,6 +1,7 @@
 import express, { type Express } from "express";
 import { ENV } from "./env";
 import { getDiskMediaConfig, resolveLegacyMediaUrl } from "../storage";
+import { recordMediaDelivery } from "./mediaUsage";
 
 /**
  * Registers the public media route for a Render persistent disk and keeps a
@@ -14,6 +15,13 @@ import { getDiskMediaConfig, resolveLegacyMediaUrl } from "../storage";
 export function registerStorageProxy(app: Express) {
   const diskMedia = getDiskMediaConfig();
   if (diskMedia) {
+    app.use(diskMedia.publicPath, (req, res, next) => {
+      res.once("finish", () => {
+        const contentLength = res.getHeader("Content-Length");
+        recordMediaDelivery(res.statusCode, Array.isArray(contentLength) ? contentLength[0] : contentLength);
+      });
+      next();
+    });
     app.use(
       diskMedia.publicPath,
       express.static(diskMedia.directory, {

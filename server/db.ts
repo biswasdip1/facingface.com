@@ -4869,3 +4869,84 @@ export async function hasRecentReminder(userId: number, days: number = INACTIVE_
 
   return result.length > 0;
 }
+
+
+// ─── System Resource & Abuse Monitoring ─────────────────────────────────────
+export type ResourceAbuseSignal = {
+  userId: number;
+  name: string | null;
+  email: string | null;
+  violationCount: number;
+  suspendedUntil: Date | null;
+  postsLast24Hours: number;
+  documentBytesLast24Hours: number;
+  signals: Array<"high_activity" | "prior_violation" | "active_suspension">;
+};
+
+export async function getResourceAbuseSignals(opts?: { postWarningThreshold?: number; limit?: number }): Promise<ResourceAbuseSignal[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const threshold = Math.max(1, opts?.postWarningThreshold ?? 20);
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const now = new Date();
+  const activityRows = await db.select({
+    authorId: posts.authorId,
+    postsLast24Hours: sql<number>`COUNT(*)`,
+    documentBytesLast24Hours: sql<number>`COALESCE(SUM(${posts.docSize}), 0)`,
+  })
+    .from(posts)
+    .where(gte(posts.createdAt, since))
+    .groupBy(posts.authorId);
+  const activityByUser = new Map(activityRows.map((row) => [row.authorId, {
+    postsLast24Hours: Number(row.postsLast24Hours ?? 0),
+    documentBytesLast24Hours: Number(row.documentBytesLast24Hours ?? 0),
+  }]));
+
+  const userRows = await db.select({
+    id: users.id,
+    name: users.name,
+    email: users.email,
+    role: users.role,
+    violationCount: users.violationCount,
+    suspendedUntil: users.suspendedUntil,
+  }).from(users);
+
+  return userRows
+    .filter((user) => user.role !== "super_admin")
+    .map((user) => {
+      const activity = activityByUser.get(user.id) ?? { postsLast24Hours: 0, documentBytesLast24Hours: 0 };
+      const signals: ResourceAbuseSignal["signals"] = [];
+      if (activity.postsLast24Hours >= threshold) signals.push("high_activity");
+      if ((user.violationCount ?? 0) > 0) signals.push("prior_violation");
+      if (user.suspendedUntil && user.suspendedUntil > now) signals.push("active_suspension");
+      return {
+        userId: user.id,
+        name: user.name,
+        email: user.email,
+        violationCount: user.violationCount ?? 0,
+        suspendedUntil: user.suspendedUntil,
+        postsLast24Hours: activity.postsLast24Hours,
+        documentBytesLast24Hours: activity.documentBytesLast24Hours,
+        signals,
+      };
+    })
+    .filter((signal) => signal.signals.length > 0)
+    .sort((a, b) => b.signals.length - a.signals.length || b.postsLast24Hours - a.postsLast24Hours || b.violationCount - a.violationCount)
+    .slice(0, Math.max(1, Math.min(opts?.limit ?? 50, 100)));
+}
+
+export async function getMediaRecordSummary(): Promise<{ mediaPosts: number; documents: number; recordedDocumentBytes: number }> {
+  const db = await getDb();
+  if (!db) return { mediaPosts: 0, documents: 0, recordedDocumentBytes: 0 };
+  const [row] = await db.select({
+    mediaPosts: sql<number>`COUNT(*) FILTER (WHERE ${posts.mediaUrl} IS NOT NULL OR ${posts.audioUrl} IS NOT NULL)`,
+    documents: sql<number>`COUNT(*) FILTER (WHERE ${posts.docUrl} IS NOT NULL)`,
+    recordedDocumentBytes: sql<number>`COALESCE(SUM(${posts.docSize}), 0)`,
+  }).from(posts);
+  return {
+    mediaPosts: Number(row?.mediaPosts ?? 0),
+    documents: Number(row?.documents ?? 0),
+    recordedDocumentBytes: Number(row?.recordedDocumentBytes ?? 0),
+  };
+}
