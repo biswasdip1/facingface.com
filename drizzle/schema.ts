@@ -666,7 +666,7 @@ export type InsertPublicGroupPost = typeof publicGroupPosts.$inferInsert;
 
 // Public Group posts have their own identifiers, so comments are kept in a
 // dedicated table instead of reusing ordinary post comments and risking ID clashes.
-export const publicGroupPostComments = pgTable("public_group_post_comments", {
+export const publicGroupPostComments = pgTable("public_group_post_comment_records", {
   id: serial("id").primaryKey(),
   postId: integer("postId").notNull(),
   authorId: integer("authorId").notNull(),

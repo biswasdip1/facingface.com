@@ -252,22 +252,19 @@ export async function ensurePublicGroupCommentStorage(): Promise<boolean> {
   if (!db) return false;
   if (publicGroupCommentStorageReady) return true;
   try {
-    if (!(await relationExists("public_group_post_comments"))) {
-      await db.execute(sql`
-        CREATE TABLE "public_group_post_comments" (
-          "id" serial PRIMARY KEY NOT NULL,
-          "postId" integer NOT NULL,
-          "authorId" integer NOT NULL,
-          "text" text NOT NULL,
-          "createdAt" timestamp DEFAULT now() NOT NULL,
-          "updatedAt" timestamp DEFAULT now() NOT NULL
-        )
-      `);
-    }
-    const indexNames = await existingIndexNames("public_group_post_comments");
-    if (!indexNames.has("public_group_post_comments_postId_idx")) {
-      await db.execute(sql`CREATE INDEX "public_group_post_comments_postId_idx" ON "public_group_post_comments" ("postId", "createdAt")`);
-    }
+    // v2 is separate from the earlier partially provisioned comment table so
+    // a legacy schema mismatch cannot prevent a Group discussion from saving.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "public_group_post_comment_records" (
+        "id" serial PRIMARY KEY NOT NULL,
+        "postId" integer NOT NULL,
+        "authorId" integer NOT NULL,
+        "text" text NOT NULL,
+        "createdAt" timestamp DEFAULT now() NOT NULL,
+        "updatedAt" timestamp DEFAULT now() NOT NULL
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "public_group_comment_record_post_idx" ON "public_group_post_comment_records" ("postId", "createdAt")`);
     publicGroupCommentStorageReady = true;
     return true;
   } catch (error) {

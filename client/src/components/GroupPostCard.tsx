@@ -94,23 +94,25 @@ function GroupReactionControl({ groupHandle, postId }: { groupHandle: string; po
     setReaction.mutate({ handle: groupHandle, postId, reaction: mine === reaction ? null : reaction });
   };
 
-  return <div className="flex flex-col gap-2">
-    {total > 0 && <div className="flex items-center gap-1.5 min-w-0">
-      <div className="flex items-center" aria-label={`${total.toLocaleString()} reactions`}>
-        {Object.entries(counts).filter(([, count]) => count > 0).sort(([, a], [, b]) => b - a).slice(0, 3).map(([type], index) => (
-          <span key={type} className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-background border border-border text-[11px] shadow-sm" style={{ marginLeft: index ? "-6px" : 0, zIndex: 3 - index }}>{GROUP_REACTIONS.find((reaction) => reaction.type === type)?.emoji ?? "•"}</span>
-        ))}
-      </div>
-      {reactors.length > 0 && <div className="flex items-center" aria-label={`Recent people who reacted: ${reactors.map((reactor) => reactor.name ?? "Member").join(", ")}`}>
-        {reactors.map((reactor, index) => <span key={reactor.userId} title={`${reactor.name ?? "Member"} reacted`} className="inline-flex items-center justify-center overflow-hidden w-5 h-5 rounded-full border-2 border-background bg-muted text-[8px] font-bold" style={{ marginLeft: index ? "-6px" : 0, zIndex: 5 - index }}>{reactor.avatar ? <img src={reactor.avatar} alt="" className="w-full h-full object-cover" /> : initials(reactor.name)}</span>)}
-      </div>}
-      <span className="text-xs font-semibold text-muted-foreground tabular-nums">{total.toLocaleString()}</span>
-    </div>}
-    <div className="relative w-fit" ref={pickerRef}>
-      <button type="button" disabled={!user || setReaction.isPending} onClick={() => choose((mine ?? "like") as GroupReaction)} onMouseEnter={() => { if (user) setHoverTimer(setTimeout(() => setPickerOpen(true), 350)); }} onMouseLeave={() => { if (hoverTimer) clearTimeout(hoverTimer); }} className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground hover:text-primary disabled:opacity-50" style={mine ? { color: current?.color } : undefined} aria-label={mine ? `Remove ${current?.label ?? "reaction"}` : "Like this Group post"}>
+  return <div className="flex min-h-9 items-center justify-between gap-3 border-b border-border/50 pb-2">
+    <div className="flex items-center gap-1.5 min-w-0">
+      {total > 0 && <>
+        <div className="flex items-center" aria-label={`${total.toLocaleString()} reactions`}>
+          {Object.entries(counts).filter(([, count]) => count > 0).sort(([, a], [, b]) => b - a).slice(0, 3).map(([type], index) => (
+            <span key={type} className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-background border border-border text-[11px] shadow-sm" style={{ marginLeft: index ? "-6px" : 0, zIndex: 3 - index }}>{GROUP_REACTIONS.find((reaction) => reaction.type === type)?.emoji ?? "•"}</span>
+          ))}
+        </div>
+        {reactors.length > 0 && <div className="flex items-center" aria-label={`Recent people who reacted: ${reactors.map((reactor) => reactor.name ?? "Member").join(", ")}`}>
+          {reactors.map((reactor, index) => <span key={reactor.userId} title={`${reactor.name ?? "Member"} reacted`} className="inline-flex items-center justify-center overflow-hidden w-5 h-5 rounded-full border-2 border-background bg-muted text-[8px] font-bold" style={{ marginLeft: index ? "-6px" : 0, zIndex: 5 - index }}>{reactor.avatar ? <img src={reactor.avatar} alt="" className="w-full h-full object-cover" /> : initials(reactor.name)}</span>)}
+        </div>}
+        <span className="text-xs font-semibold text-muted-foreground tabular-nums">{total.toLocaleString()}</span>
+      </>}
+    </div>
+    <div className="relative shrink-0" ref={pickerRef}>
+      <button type="button" disabled={!user || setReaction.isPending} onClick={() => choose((mine ?? "like") as GroupReaction)} onMouseEnter={() => { if (user) setHoverTimer(setTimeout(() => setPickerOpen(true), 350)); }} onMouseLeave={() => { if (hoverTimer) clearTimeout(hoverTimer); }} className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-primary disabled:opacity-50" style={mine ? { color: current?.color } : undefined} aria-label={mine ? `Remove ${current?.label ?? "reaction"}` : "Like this Group post"}>
         <span>{current?.emoji ?? "👍"}</span><span>{current?.label ?? "Like"}</span>
       </button>
-      {pickerOpen && <div className="absolute bottom-full left-0 mb-2 z-30 flex gap-1 rounded-full border border-border bg-background px-3 py-2 shadow-xl" onMouseLeave={() => setPickerOpen(false)}>
+      {pickerOpen && <div className="absolute bottom-full right-0 mb-2 z-30 flex gap-1 rounded-full border border-border bg-background px-3 py-2 shadow-xl" onMouseLeave={() => setPickerOpen(false)}>
         {GROUP_REACTIONS.map((reaction) => <button type="button" key={reaction.type} disabled={!user || setReaction.isPending} onClick={() => choose(reaction.type)} className={`text-xl transition-transform hover:scale-125 ${mine === reaction.type ? "scale-125" : ""}`} title={reaction.label} aria-label={reaction.label}>{reaction.emoji}</button>)}
       </div>}
     </div>
