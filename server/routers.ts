@@ -197,6 +197,8 @@ import {
   transferPageOwnership,
   createPublicGroup,
   getPublicGroupByHandle,
+  getPublicGroupById,
+  getSavedPublicGroupPosts,
   normaliseUnsafePublicGroupHandle,
   listPublicGroups,
   updatePublicGroup,
@@ -213,6 +215,9 @@ import {
   getPublicGroupPostCommentCounts,
   getPublicGroupPostReactionSummary,
   setPublicGroupPostReaction,
+  togglePublicGroupPostSave,
+  isPublicGroupPostSaved,
+  repostPublicGroupPost,
   createPublicGroupPostComment,
   deletePublicGroupPostComment,
   uploadPublicGroupCover,
@@ -1631,15 +1636,21 @@ const bookmarksRouter = router({
   getSaved: protectedProcedure
     .input(z.object({ limit: z.number().min(1).max(50).default(20), offset: z.number().default(0) }))
     .query(async ({ ctx, input }) => {
-      const rows = await getBookmarkedPosts(ctx.user.id, input.limit, input.offset);
-      if (rows.length === 0) return { posts: [], authors: {}, likeCounts: {} };
+      const [rows, groupPosts] = await Promise.all([
+        getBookmarkedPosts(ctx.user.id, input.limit, input.offset),
+        getSavedPublicGroupPosts(ctx.user.id, input.limit, input.offset),
+      ]);
       const postsList = rows.map((r) => r.post);
-      const authorIds = Array.from(new Set(postsList.map((p) => p.authorId)));
+      const authorIds = Array.from(new Set([...postsList, ...groupPosts].map((post) => post.authorId)));
       const authorRows = await Promise.all(authorIds.map((id) => getUserById(id)));
       const authors: Record<number, { id: number; name: string | null; avatar: string | null }> = {};
       for (const a of authorRows) if (a) authors[a.id] = { id: a.id, name: a.name, avatar: a.avatar ?? null };
+      const groupIds = Array.from(new Set(groupPosts.map((post) => post.groupId)));
+      const groupRows = await Promise.all(groupIds.map((id) => getPublicGroupById(id)));
+      const groups: Record<number, { id: number; name: string; handle: string }> = {};
+      for (const group of groupRows) if (group) groups[group.id] = { id: group.id, name: group.name, handle: group.handle };
       const likeCounts = await getLikeCounts(postsList.map((p) => p.id), "post");
-      return { posts: postsList, authors, likeCounts };
+      return { posts: postsList, authors, likeCounts, groupPosts, groups };
     }),
 
   getCounts: protectedProcedure
@@ -3424,6 +3435,41 @@ const publicGroupsRouter = router({
       if (!post || post.groupId !== group.id) throw new TRPCError({ code: "NOT_FOUND" });
       await setPublicGroupPostReaction(ctx.user.id, post.id, input.reaction);
       return getPublicGroupPostReactionSummary(post.id, ctx.user.id);
+    }),
+
+  isSaved: protectedProcedure
+    .input(z.object({ handle: z.string(), postId: z.number().int() }))
+    .query(async ({ input, ctx }) => {
+      const group = await getPublicGroupByHandle(input.handle);
+      if (!group) throw new TRPCError({ code: "NOT_FOUND" });
+      const post = await getPublicGroupPostById(input.postId);
+      if (!post || post.groupId !== group.id) throw new TRPCError({ code: "NOT_FOUND" });
+      return { saved: await isPublicGroupPostSaved(ctx.user.id, post.id) };
+    }),
+
+  toggleSaved: protectedProcedure
+    .input(z.object({ handle: z.string(), postId: z.number().int() }))
+    .mutation(async ({ input, ctx }) => {
+      const group = await getPublicGroupByHandle(input.handle);
+      if (!group) throw new TRPCError({ code: "NOT_FOUND" });
+      const membership = await getPublicGroupMembership(group.id, ctx.user.id);
+      if (!membership) throw new TRPCError({ code: "FORBIDDEN", message: "Join the group to save a Group post." });
+      const post = await getPublicGroupPostById(input.postId);
+      if (!post || post.groupId !== group.id) throw new TRPCError({ code: "NOT_FOUND" });
+      return togglePublicGroupPostSave(ctx.user.id, post.id);
+    }),
+
+  repost: protectedProcedure
+    .input(z.object({ handle: z.string(), postId: z.number().int() }))
+    .mutation(async ({ input, ctx }) => {
+      const group = await getPublicGroupByHandle(input.handle);
+      if (!group) throw new TRPCError({ code: "NOT_FOUND" });
+      const membership = await getPublicGroupMembership(group.id, ctx.user.id);
+      if (!membership) throw new TRPCError({ code: "FORBIDDEN", message: "Join the group to repost." });
+      const post = await getPublicGroupPostById(input.postId);
+      if (!post || post.groupId !== group.id) throw new TRPCError({ code: "NOT_FOUND" });
+      const postId = await repostPublicGroupPost(ctx.user.id, post.id);
+      return { postId };
     }),
 
   getComments: publicProcedure

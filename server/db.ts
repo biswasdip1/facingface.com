@@ -82,6 +82,8 @@ import {
   InsertPublicGroupPost,
   publicGroupPostComments,
   PublicGroupPostComment,
+  publicGroupPostReactions,
+  publicGroupPostSaves,
   stories,
   Story,
   InsertStory,
@@ -274,6 +276,58 @@ export async function ensurePublicGroupCommentStorage(): Promise<boolean> {
   }
 }
 
+let publicGroupInteractionStorageReady = false;
+export async function ensurePublicGroupInteractionStorage(): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  if (publicGroupInteractionStorageReady) return true;
+  try {
+    if (await relationExists("public_group_posts")) {
+      const columns = await existingColumns("public_group_posts");
+      if (!columns.has("resharedFromId")) {
+        await db.execute(sql`ALTER TABLE "public_group_posts" ADD COLUMN "resharedFromId" integer`);
+      }
+    }
+    if (!(await relationExists("public_group_post_reactions"))) {
+      await db.execute(sql`
+        CREATE TABLE "public_group_post_reactions" (
+          "id" serial PRIMARY KEY NOT NULL,
+          "groupPostId" integer NOT NULL,
+          "userId" integer NOT NULL,
+          "reaction" varchar(12) NOT NULL,
+          "createdAt" timestamp DEFAULT now() NOT NULL
+        )
+      `);
+    }
+    if (!(await relationExists("public_group_post_saves"))) {
+      await db.execute(sql`
+        CREATE TABLE "public_group_post_saves" (
+          "id" serial PRIMARY KEY NOT NULL,
+          "groupPostId" integer NOT NULL,
+          "userId" integer NOT NULL,
+          "createdAt" timestamp DEFAULT now() NOT NULL
+        )
+      `);
+    }
+    const reactionIndexes = await existingIndexNames("public_group_post_reactions");
+    if (!reactionIndexes.has("public_group_post_reactions_member_idx")) {
+      await db.execute(sql`CREATE UNIQUE INDEX "public_group_post_reactions_member_idx" ON "public_group_post_reactions" ("groupPostId", "userId")`);
+    }
+    if (!reactionIndexes.has("public_group_post_reactions_recent_idx")) {
+      await db.execute(sql`CREATE INDEX "public_group_post_reactions_recent_idx" ON "public_group_post_reactions" ("groupPostId", "createdAt" DESC)`);
+    }
+    const saveIndexes = await existingIndexNames("public_group_post_saves");
+    if (!saveIndexes.has("public_group_post_saves_member_idx")) {
+      await db.execute(sql`CREATE UNIQUE INDEX "public_group_post_saves_member_idx" ON "public_group_post_saves" ("groupPostId", "userId")`);
+    }
+    publicGroupInteractionStorageReady = true;
+    return true;
+  } catch (error) {
+    console.warn("[PublicGroups] Interaction storage is unavailable.", error instanceof Error ? error.message : error);
+    return false;
+  }
+}
+
 export async function ensureInactiveReminderStorage(): Promise<boolean> {
   const db = await getDb();
   if (!db) {
@@ -400,9 +454,10 @@ export async function ensureLegacyRuntimeSchema(): Promise<void> {
       }
     }
 
-    // Group comments are a self-contained compatibility structure. A failure
-    // here must never prevent existing Group posts from appearing.
+    // Group comments and interaction records are self-contained compatibility
+    // structures. A failure must never prevent existing Group posts from loading.
     await ensurePublicGroupCommentStorage();
+    await ensurePublicGroupInteractionStorage();
 
     if (await relationExists("reel_likes")) {
       // Duplicate rows represent repeated clicks rather than separate people.
@@ -1144,32 +1199,116 @@ export async function getPublicGroupPostReactionSummary(postId: number, userId?:
   reactors: Array<{ userId: number; name: string | null; avatar: string | null; reaction: StandardReactionType }>;
 }> {
   const db = await getDb();
-  if (!db) return { counts: {}, total: 0, myReaction: null, reactors: [] };
-  const rows = await db.select({ userId: emojiReactions.userId, reaction: emojiReactions.emoji, createdAt: emojiReactions.createdAt })
-    .from(emojiReactions)
-    .where(and(eq(emojiReactions.targetId, postId), eq(emojiReactions.targetType, "public_group_post")));
+  if (!db || !(await ensurePublicGroupInteractionStorage())) return { counts: {}, total: 0, myReaction: null, reactors: [] };
+  const rows = await db.select({
+    userId: publicGroupPostReactions.userId,
+    reaction: publicGroupPostReactions.reaction,
+    createdAt: publicGroupPostReactions.createdAt,
+    name: users.name,
+    avatar: users.avatar,
+  })
+    .from(publicGroupPostReactions)
+    .leftJoin(users, eq(publicGroupPostReactions.userId, users.id))
+    .where(eq(publicGroupPostReactions.groupPostId, postId));
   const summary = summarisePublicGroupReactions(
     rows.map((row) => ({ userId: row.userId, reaction: row.reaction, createdAt: new Date(row.createdAt) })),
     userId,
   );
-  const reactors = await Promise.all(summary.recent.map(async (row) => {
-    const member = await getUserById(row.userId);
+  const profileByUser = new Map(rows.map((row) => [row.userId, row]));
+  const reactors = summary.recent.map((row) => {
+    const member = profileByUser.get(row.userId);
     return { userId: row.userId, name: member?.name ?? null, avatar: member?.avatar ?? null, reaction: row.reaction as StandardReactionType };
-  }));
+  });
   return { counts: summary.counts, total: summary.total, myReaction: summary.myReaction, reactors };
 }
 
 export async function setPublicGroupPostReaction(userId: number, postId: number, reaction: StandardReactionType | null): Promise<void> {
   const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  await db.delete(emojiReactions).where(and(
-    eq(emojiReactions.userId, userId),
-    eq(emojiReactions.targetId, postId),
-    eq(emojiReactions.targetType, "public_group_post"),
-  ));
-  if (reaction) {
-    await db.insert(emojiReactions).values({ userId, targetId: postId, targetType: "public_group_post", emoji: reaction });
+  if (!db || !(await ensurePublicGroupInteractionStorage())) throw new Error("Group reactions are temporarily unavailable. Please try again shortly.");
+  const where = and(eq(publicGroupPostReactions.userId, userId), eq(publicGroupPostReactions.groupPostId, postId));
+  if (!reaction) {
+    await db.delete(publicGroupPostReactions).where(where);
+    return;
   }
+  const existing = await db.select({ id: publicGroupPostReactions.id }).from(publicGroupPostReactions).where(where).limit(1);
+  if (existing[0]) {
+    await db.update(publicGroupPostReactions).set({ reaction, createdAt: new Date() }).where(eq(publicGroupPostReactions.id, existing[0].id));
+  } else {
+    await db.insert(publicGroupPostReactions).values({ userId, groupPostId: postId, reaction });
+  }
+}
+
+export async function togglePublicGroupPostSave(userId: number, postId: number): Promise<{ saved: boolean }> {
+  const db = await getDb();
+  if (!db || !(await ensurePublicGroupInteractionStorage())) throw new Error("Saved items are temporarily unavailable. Please try again shortly.");
+  const where = and(eq(publicGroupPostSaves.userId, userId), eq(publicGroupPostSaves.groupPostId, postId));
+  const existing = await db.select({ id: publicGroupPostSaves.id }).from(publicGroupPostSaves).where(where).limit(1);
+  if (existing[0]) {
+    await db.delete(publicGroupPostSaves).where(where);
+    return { saved: false };
+  }
+  await db.insert(publicGroupPostSaves).values({ userId, groupPostId: postId });
+  return { saved: true };
+}
+
+export async function isPublicGroupPostSaved(userId: number, postId: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db || !(await ensurePublicGroupInteractionStorage())) return false;
+  const rows = await db.select({ id: publicGroupPostSaves.id }).from(publicGroupPostSaves)
+    .where(and(eq(publicGroupPostSaves.userId, userId), eq(publicGroupPostSaves.groupPostId, postId))).limit(1);
+  return Boolean(rows[0]);
+}
+
+export async function repostPublicGroupPost(userId: number, postId: number): Promise<number> {
+  const db = await getDb();
+  if (!db || !(await ensurePublicGroupInteractionStorage())) throw new Error("Group reposts are temporarily unavailable. Please try again shortly.");
+  const original = await getPublicGroupPostById(postId);
+  if (!original) throw new Error("Group post not found.");
+  const [repost] = await db.insert(publicGroupPosts).values({
+    groupId: original.groupId,
+    authorId: userId,
+    content: original.content,
+    mediaUrl: original.mediaUrl,
+    mediaType: original.mediaType,
+    photo2Url: original.photo2Url,
+    photo3Url: original.photo3Url,
+    photo1Caption: original.photo1Caption,
+    photo2Caption: original.photo2Caption,
+    photo3Caption: original.photo3Caption,
+    photo1Alt: original.photo1Alt,
+    photo2Alt: original.photo2Alt,
+    photo3Alt: original.photo3Alt,
+    videoPosterUrl: original.videoPosterUrl,
+    audioUrl: original.audioUrl,
+    audioName: original.audioName,
+    docUrl: original.docUrl,
+    docName: original.docName,
+    docSize: original.docSize,
+    docType: original.docType,
+    pollId: original.pollId,
+    bgColor: original.bgColor,
+    linkUrl: original.linkUrl,
+    linkTitle: original.linkTitle,
+    linkDescription: original.linkDescription,
+    linkImage: original.linkImage,
+    linkSiteName: original.linkSiteName,
+    resharedFromId: original.id,
+  }).returning({ id: publicGroupPosts.id });
+  await db.update(publicGroupPosts).set({ shareCount: sql`${publicGroupPosts.shareCount} + 1`, updatedAt: new Date() }).where(eq(publicGroupPosts.id, original.id));
+  return repost.id;
+}
+
+export async function getSavedPublicGroupPosts(userId: number, limit = 20, offset = 0): Promise<PublicGroupPost[]> {
+  const db = await getDb();
+  if (!db || !(await ensurePublicGroupInteractionStorage())) return [];
+  const rows = await db.select({ post: publicGroupPosts })
+    .from(publicGroupPostSaves)
+    .innerJoin(publicGroupPosts, eq(publicGroupPostSaves.groupPostId, publicGroupPosts.id))
+    .where(eq(publicGroupPostSaves.userId, userId))
+    .orderBy(desc(publicGroupPostSaves.createdAt))
+    .limit(limit)
+    .offset(offset);
+  return rows.map((row) => row.post);
 }
 
 export async function getEmojiReaction(
@@ -2972,6 +3111,13 @@ export async function getPublicGroupByHandle(handle: string): Promise<PublicGrou
   return result[0];
 }
 
+export async function getPublicGroupById(id: number): Promise<PublicGroup | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(publicGroups).where(eq(publicGroups.id, id)).limit(1);
+  return result[0];
+}
+
 export async function normaliseUnsafePublicGroupHandle(group: PublicGroup): Promise<PublicGroup> {
   if (!isUnsafePublicGroupHandle(group.handle)) return group;
   const db = await getDb();
@@ -2981,13 +3127,6 @@ export async function normaliseUnsafePublicGroupHandle(group: PublicGroup): Prom
     .set({ handle: canonicalHandle, legacyHandle: group.handle, updatedAt: new Date() })
     .where(eq(publicGroups.id, group.id));
   return { ...group, handle: canonicalHandle, legacyHandle: group.handle };
-}
-
-export async function getPublicGroupById(id: number): Promise<PublicGroup | undefined> {
-  const db = await getDb();
-  if (!db) return undefined;
-  const result = await db.select().from(publicGroups).where(eq(publicGroups.id, id)).limit(1);
-  return result[0];
 }
 
 export async function listPublicGroups(search?: string, limit = 24, offset = 0): Promise<PublicGroup[]> {

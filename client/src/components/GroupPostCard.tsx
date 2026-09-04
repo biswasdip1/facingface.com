@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { formatDistanceToNow } from "date-fns";
-import { ExternalLink, FileText, MessageCircle, Send, Trash2 } from "lucide-react";
+import { Bookmark, ExternalLink, FileText, MessageCircle, Repeat2, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,8 @@ type GroupPost = {
   linkDescription: string | null;
   linkImage: string | null;
   linkSiteName: string | null;
+  resharedFromId?: number | null;
+  shareCount?: number | null;
   createdAt: Date;
 };
 
@@ -151,6 +153,24 @@ export default function GroupPostCard({
     },
     onError: (error) => toast.error(error.message),
   });
+  const { data: savedData } = trpc.publicGroups.isSaved.useQuery(
+    { handle: groupHandle, postId: post.id },
+    { enabled: Boolean(user) },
+  );
+  const toggleSaved = trpc.publicGroups.toggleSaved.useMutation({
+    onSuccess: async (result) => {
+      await utils.publicGroups.isSaved.invalidate({ handle: groupHandle, postId: post.id });
+      toast.success(result.saved ? "Post saved" : "Removed from saved posts");
+    },
+    onError: (error) => toast.error(error.message),
+  });
+  const repost = trpc.publicGroups.repost.useMutation({
+    onSuccess: async () => {
+      await utils.publicGroups.getPosts.invalidate({ handle: groupHandle });
+      toast.success("Reposted to this Public Group");
+    },
+    onError: (error) => toast.error(error.message),
+  });
 
   const commentCount = commentData?.comments.length ?? initialCommentCount;
   const background = post.bgColor ?? "";
@@ -168,7 +188,7 @@ export default function GroupPostCard({
             </Avatar>
             <div className="min-w-0">
               <p className="font-semibold text-sm truncate">{author?.name ?? "Unknown member"}</p>
-              <p className="text-xs text-muted-foreground">{formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })}</p>
+              <p className="text-xs text-muted-foreground">{post.resharedFromId ? "Reposted in this Group · " : ""}{formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })}</p>
             </div>
           </Link>
           {onDelete && canModerate && (
@@ -212,9 +232,17 @@ export default function GroupPostCard({
 
       <div className="border-t border-border px-4 py-3 flex flex-col gap-3">
         <GroupReactionControl groupHandle={groupHandle} postId={post.id} />
-        <button type="button" onClick={() => setShowComments((visible) => !visible)} className="inline-flex w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-          <MessageCircle className="w-4 h-4" /> {commentCount} comment{commentCount === 1 ? "" : "s"}
-        </button>
+        <div className="grid grid-cols-3 border-t border-border/50 pt-2">
+          <button type="button" onClick={() => setShowComments((visible) => !visible)} className={`inline-flex items-center justify-center gap-1.5 py-1.5 text-sm font-semibold transition-colors border-r border-border/50 ${showComments ? "text-primary" : "text-muted-foreground hover:text-foreground"}`} aria-label={showComments ? "Hide comments" : "Show comments"}>
+            <MessageCircle className="w-4 h-4" /> <span>Comment{commentCount ? ` ${commentCount}` : ""}</span>
+          </button>
+          <button type="button" disabled={!user || repost.isPending} onClick={() => repost.mutate({ handle: groupHandle, postId: post.id })} className="inline-flex items-center justify-center gap-1.5 py-1.5 text-sm font-semibold text-muted-foreground hover:text-green-600 disabled:opacity-50 transition-colors border-r border-border/50" aria-label="Repost to this Public Group">
+            <Repeat2 className="w-4 h-4" /> <span>Repost{post.shareCount ? ` ${post.shareCount}` : ""}</span>
+          </button>
+          <button type="button" disabled={!user || toggleSaved.isPending} onClick={() => toggleSaved.mutate({ handle: groupHandle, postId: post.id })} className={`inline-flex items-center justify-center gap-1.5 py-1.5 text-sm font-semibold disabled:opacity-50 transition-colors ${savedData?.saved ? "text-[var(--its-red)]" : "text-muted-foreground hover:text-[var(--its-red)]"}`} aria-label={savedData?.saved ? "Remove from saved posts" : "Save post"} aria-pressed={savedData?.saved}>
+            <Bookmark className="w-4 h-4" fill={savedData?.saved ? "currentColor" : "none"} /> <span>{savedData?.saved ? "Saved" : "Save"}</span>
+          </button>
+        </div>
         {showComments && (
           <div className="space-y-3 pt-1">
             {commentsLoading ? <p className="text-xs text-muted-foreground">Loading comments…</p> : commentData?.comments.map((comment) => {

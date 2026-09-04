@@ -656,6 +656,7 @@ export const publicGroupPosts = pgTable("public_group_posts", {
   linkDescription: text("linkDescription"),
   linkImage: varchar("linkImage", { length: 512 }),
   linkSiteName: varchar("linkSiteName", { length: 100 }),
+  resharedFromId: integer("resharedFromId"),
   shareCount: integer("shareCount").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
@@ -675,6 +676,27 @@ export const publicGroupPostComments = pgTable("public_group_post_comments", {
 });
 export type PublicGroupPostComment = typeof publicGroupPostComments.$inferSelect;
 export type InsertPublicGroupPostComment = typeof publicGroupPostComments.$inferInsert;
+
+// Public Group interactions are deliberately separate from the legacy generic
+// emoji reaction enum so older production databases can save Group reactions.
+export const publicGroupPostReactions = pgTable("public_group_post_reactions", {
+  id: serial("id").primaryKey(),
+  groupPostId: integer("groupPostId").notNull(),
+  userId: integer("userId").notNull(),
+  reaction: varchar("reaction", { length: 12 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type PublicGroupPostReaction = typeof publicGroupPostReactions.$inferSelect;
+export type InsertPublicGroupPostReaction = typeof publicGroupPostReactions.$inferInsert;
+
+export const publicGroupPostSaves = pgTable("public_group_post_saves", {
+  id: serial("id").primaryKey(),
+  groupPostId: integer("groupPostId").notNull(),
+  userId: integer("userId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type PublicGroupPostSave = typeof publicGroupPostSaves.$inferSelect;
+export type InsertPublicGroupPostSave = typeof publicGroupPostSaves.$inferInsert;
 
 // ─── Stories ─────────────────────────────────────────────────────────────────
 export const stories = pgTable("stories", {

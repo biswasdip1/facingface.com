@@ -26,7 +26,9 @@ export default function SavedPage() {
   }
 
   const posts = data?.posts ?? [];
+  const groupPosts = data?.groupPosts ?? [];
   const authors = data?.authors ?? {};
+  const groups = data?.groups ?? {};
   const likeCounts = data?.likeCounts ?? {};
 
   return (
@@ -42,7 +44,7 @@ export default function SavedPage() {
         <div className="flex items-center justify-center py-16">
           <Loader2 size={24} className="animate-spin text-muted-foreground" />
         </div>
-      ) : posts.length === 0 ? (
+      ) : posts.length === 0 && groupPosts.length === 0 ? (
         <div className="text-center py-16 px-4">
           <Bookmark size={40} className="mx-auto mb-4 text-muted-foreground opacity-40" />
           <h2 className="text-sm font-bold uppercase tracking-widest mb-2">No saved posts yet</h2>
@@ -68,6 +70,24 @@ export default function SavedPage() {
               />
             );
           })}
+
+          {groupPosts.length > 0 && (
+            <section className="border-t border-border mt-4 pt-4">
+              <p className="px-4 sm:px-0 mb-3 text-xs font-black uppercase tracking-widest text-muted-foreground">Saved from Public Groups</p>
+              <div className="space-y-3">
+                {groupPosts.map((post) => {
+                  const group = groups[post.groupId];
+                  const author = authors[post.authorId];
+                  return <article key={`group-${post.id}`} className="border border-border bg-card p-4">
+                    <p className="text-xs font-bold text-[var(--its-red)] uppercase tracking-wider">Public Group · {group?.name ?? "Group"}</p>
+                    <p className="mt-1 text-sm font-semibold">{author?.name ?? "Member"}</p>
+                    {post.content && <p className="mt-2 text-sm whitespace-pre-wrap break-words line-clamp-3">{post.content}</p>}
+                    <Link href={group ? `/g/${group.handle}` : "/groups"} className="mt-3 inline-block text-xs font-bold text-[var(--its-red)] hover:underline">Open Group Post →</Link>
+                  </article>;
+                })}
+              </div>
+            </section>
+          )}
 
           {/* Pagination */}
           <div className="flex items-center justify-between px-4 py-4 border-t border-border mt-2">
