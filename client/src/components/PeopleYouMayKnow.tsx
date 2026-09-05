@@ -8,6 +8,7 @@ export default function PeopleYouMayKnow() {
   const { user } = useAuth();
   const [dismissed, setDismissed] = useState<number[]>([]);
   const [sentRequests, setSentRequests] = useState<number[]>([]);
+  const [brokenAvatarIds, setBrokenAvatarIds] = useState<number[]>([]);
 
   const { data: people, isLoading } = trpc.suggestions.people.useQuery(undefined, {
     enabled: !!user,
@@ -53,10 +54,11 @@ export default function PeopleYouMayKnow() {
             {/* Avatar */}
             <Link href={`/profile/${person.id}`}>
               <div className="w-full h-28 bg-muted overflow-hidden">
-                {person.avatar ? (
+                {person.avatar && !brokenAvatarIds.includes(person.id) ? (
                   <img
                     src={person.avatar}
                     alt={person.name ?? "User"}
+                    onError={() => setBrokenAvatarIds((current) => current.includes(person.id) ? current : [...current, person.id])}
                     className="w-full h-full object-cover"
                   />
                 ) : (

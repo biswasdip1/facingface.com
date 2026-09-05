@@ -1122,3 +1122,27 @@ export const adminBroadcasts = pgTable("adminBroadcasts", {
 export type AdminBroadcast = typeof adminBroadcasts.$inferSelect;
 export type InsertAdminBroadcast = typeof adminBroadcasts.$inferInsert;
 
+
+// ─── People You May Know exclusions ──────────────────────────────────────────
+// A global administrator-controlled exclusion removes a member from suggestion
+// surfaces only; it never deletes their account or prevents normal search.
+export const peopleYouMayKnowExclusions = pgTable("people_you_may_know_exclusions", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
+  removedByUserId: integer("removedByUserId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type PeopleYouMayKnowExclusion = typeof peopleYouMayKnowExclusions.$inferSelect;
+export type InsertPeopleYouMayKnowExclusion = typeof peopleYouMayKnowExclusions.$inferInsert;
+
+// ─── Suggested Page exclusions ──────────────────────────────────────────────
+// Global admin controls for the Feed suggestion card. Removing a Page here does
+// not delete, suspend, hide, or otherwise alter the Page itself.
+export const suggestedPageExclusions = pgTable("suggested_page_exclusions", {
+  id: serial("id").primaryKey(),
+  pageId: integer("pageId").notNull().unique().references(() => orgPages.id, { onDelete: "cascade" }),
+  removedByUserId: integer("removedByUserId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type SuggestedPageExclusion = typeof suggestedPageExclusions.$inferSelect;
+export type InsertSuggestedPageExclusion = typeof suggestedPageExclusions.$inferInsert;

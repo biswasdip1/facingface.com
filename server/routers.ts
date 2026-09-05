@@ -193,6 +193,9 @@ import {
   getOrgPageByHandle,
   getOrgPageById,
   listOrgPages,
+  getSuggestedPagesForUser,
+  getSuggestedPagesForAdmin,
+  excludeSuggestedPage,
   isPageFollower,
   getPageFollowRecord,
   getPendingPageFollowRequests,
@@ -372,6 +375,8 @@ import {
   trackAdEvent,
   getAdStats,
   getSuggestedUsers,
+  getPeopleYouMayKnowAdminCandidates,
+  excludePeopleYouMayKnowUser,
   getInactiveReminderSummary,
 } from "./db";
 import { emitFriendPostFlash, getFriendPostAlertRecipients } from "./callSignaling";
@@ -2530,24 +2535,54 @@ const adminRouter = router({
       });
       return { success: true, processed: targets.length };
     }),
+  // ── Suggested Pages Management ─────────────────────────────────────────
+  getSuggestedPages: superAdminProcedure
+    .input(z.object({ limit: z.number().min(1).max(200).default(100), offset: z.number().min(0).default(0) }))
+    .query(async ({ input }) => {
+      return getSuggestedPagesForAdmin(input.limit, input.offset);
+    }),
+  removeSuggestedPage: superAdminProcedure
+    .input(z.object({ pageId: z.number().int().positive() }))
+    .mutation(async ({ input, ctx }) => {
+      const page = await getOrgPageById(input.pageId);
+      if (!page) throw new TRPCError({ code: "NOT_FOUND", message: "Page not found." });
+      const removed = await excludeSuggestedPage(page.id, ctx.user.id);
+      await insertAuditLog({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: "remove_suggested_page",
+        metadata: JSON.stringify({ pageId: page.id, pageName: page.name, removed }),
+      });
+      return { success: true, removed };
+    }),
+
   // ── People You May Know Management ──────────────────────────────────────
   getPeopleYouMayKnow: superAdminProcedure
     .input(z.object({ limit: z.number().default(100), offset: z.number().default(0) }))
     .query(async ({ input }) => {
-      const users = await getAllUsers(input.limit, input.offset);
-      return (users as unknown as { id: number; name: string | null; email: string | null; avatar: string | null; profilePicture: string | null }[])
-        .map((u) => ({ id: u.id, name: u.name, email: u.email, profilePicture: u.profilePicture || u.avatar }));
+      const users = await getPeopleYouMayKnowAdminCandidates(input.limit, input.offset);
+      return users.map((user) => ({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        profilePicture: user.avatar,
+      }));
     }),
   removePeopleYouMayKnowSuggestion: superAdminProcedure
     .input(z.object({ userId: z.number() }))
     .mutation(async ({ input, ctx }) => {
+      if (input.userId === ctx.user.id) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "You cannot remove yourself from suggestions here." });
+      }
+      const removed = await excludePeopleYouMayKnowUser(input.userId, ctx.user.id);
       await insertAuditLog({
         actorId: ctx.user.id,
         actorName: ctx.user.name ?? undefined,
         action: "remove_pymk_suggestion",
         targetUserId: input.userId,
+        metadata: JSON.stringify({ removed }),
       });
-      return { success: true };
+      return { success: true, removed };
     }),
 });
 
@@ -2977,12 +3012,16 @@ const subscriptionRouter = router({
 
 // ─── Pages Router ───────────────────────────────────────────────────────────
 const pagesRouter = router({
-  list: publicProcedure
+    list: publicProcedure
     .input(z.object({ search: z.string().optional(), limit: z.number().default(24), offset: z.number().default(0) }))
     .query(async ({ input }) => {
       return listOrgPages(input.search, input.limit, input.offset);
     }),
-
+  suggested: protectedProcedure
+    .input(z.object({ limit: z.number().min(1).max(8).default(5) }).optional())
+    .query(async ({ input, ctx }) => {
+      return getSuggestedPagesForUser(ctx.user.id, input?.limit ?? 5);
+    }),
   getByHandle: publicProcedure
     .input(z.object({ handle: z.string() }))
     .query(async ({ input, ctx }) => {

@@ -1,6 +1,7 @@
 import { orgPagePosts, OrgPagePost, InsertOrgPagePost, commentReactions } from "./../drizzle/schema";
 import { countEffectiveReactions, mergePostReactors, type DurablePostReactor } from "./reactionConsistency";
 import { extractYouTubeVideoId, getYouTubeThumbnailUrl, isYouTubeUrl } from "./linkPreview";
+import { filterPeopleYouMayKnowCandidates } from "./peopleYouMayKnowAccess";
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -140,6 +141,8 @@ import {
   inactiveUserReminders,
   InactiveUserReminder,
   InsertInactiveUserReminder,
+  peopleYouMayKnowExclusions,
+  suggestedPageExclusions,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -370,6 +373,54 @@ export async function ensureSocialEventStorage(): Promise<boolean> {
   }
 }
 
+let peopleYouMayKnowStorageReady = false;
+export async function ensurePeopleYouMayKnowStorage(): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  if (peopleYouMayKnowStorageReady) return true;
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "people_you_may_know_exclusions" (
+        "id" serial PRIMARY KEY NOT NULL,
+        "userId" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+        "removedByUserId" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+        "createdAt" timestamp DEFAULT now() NOT NULL
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "pymk_exclusion_user_unique" ON "people_you_may_know_exclusions" ("userId")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "pymk_exclusion_removed_by_idx" ON "people_you_may_know_exclusions" ("removedByUserId", "createdAt" DESC)`);
+    peopleYouMayKnowStorageReady = true;
+    return true;
+  } catch (error) {
+    console.warn("[PeopleYouMayKnow] Exclusion storage is unavailable.", error instanceof Error ? error.message : error);
+    return false;
+  }
+}
+
+let suggestedPageStorageReady = false;
+export async function ensureSuggestedPageStorage(): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  if (suggestedPageStorageReady) return true;
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "suggested_page_exclusions" (
+        "id" serial PRIMARY KEY NOT NULL,
+        "pageId" integer NOT NULL REFERENCES "org_pages"("id") ON DELETE CASCADE,
+        "removedByUserId" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+        "createdAt" timestamp DEFAULT now() NOT NULL
+      )
+    `);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "suggested_page_exclusion_page_unique" ON "suggested_page_exclusions" ("pageId")`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS "suggested_page_exclusion_removed_by_idx" ON "suggested_page_exclusions" ("removedByUserId", "createdAt" DESC)`);
+    suggestedPageStorageReady = true;
+    return true;
+  } catch (error) {
+    console.warn("[SuggestedPages] Exclusion storage is unavailable.", error instanceof Error ? error.message : error);
+    return false;
+  }
+}
+
 export async function ensureInactiveReminderStorage(): Promise<boolean> {
   const db = await getDb();
   if (!db) {
@@ -551,6 +602,8 @@ export async function ensureLegacyRuntimeSchema(): Promise<void> {
     await ensurePublicGroupCommentStorage();
     await ensurePublicGroupInteractionStorage();
     await ensureSocialEventStorage();
+    await ensurePeopleYouMayKnowStorage();
+    await ensureSuggestedPageStorage();
 
     if (await relationExists("reel_likes")) {
       // Duplicate rows represent repeated clicks rather than separate people.
@@ -3168,6 +3221,57 @@ export async function listOrgPages(search?: string, limit = 24, offset = 0): Pro
     .limit(limit).offset(offset);
 }
 
+export async function getSuggestedPageExcludedIds(): Promise<number[]> {
+  const db = await getDb();
+  if (!db || !(await ensureSuggestedPageStorage())) return [];
+  const rows = await db.select({ pageId: suggestedPageExclusions.pageId }).from(suggestedPageExclusions);
+  return rows.map((row) => row.pageId);
+}
+
+export async function excludeSuggestedPage(pageId: number, removedByUserId: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db || !(await ensureSuggestedPageStorage())) throw new Error("Suggested Page removal storage is temporarily unavailable. Please try again shortly.");
+  const rows = await db.insert(suggestedPageExclusions)
+    .values({ pageId, removedByUserId })
+    .onConflictDoNothing({ target: suggestedPageExclusions.pageId })
+    .returning({ id: suggestedPageExclusions.id });
+  return rows.length > 0;
+}
+
+export async function getSuggestedPagesForUser(userId: number, limit = 5): Promise<OrgPage[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const [followedPageIds, globallyExcludedIds] = await Promise.all([
+    getFollowedPageIds(userId),
+    getSuggestedPageExcludedIds(),
+  ]);
+  const excludedIds = Array.from(new Set([...followedPageIds, ...globallyExcludedIds]));
+  return db.select().from(orgPages)
+    .where(and(
+      eq(orgPages.visibility, "public"),
+      eq(orgPages.isSuspended, false),
+      ne(orgPages.ownerId, userId),
+      notInArray(orgPages.id, excludedIds.length ? excludedIds : [-1]),
+    ))
+    .orderBy(desc(orgPages.followerCount), desc(orgPages.createdAt))
+    .limit(Math.max(1, Math.min(8, limit)));
+}
+
+export async function getSuggestedPagesForAdmin(limit = 100, offset = 0): Promise<OrgPage[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const excludedIds = await getSuggestedPageExcludedIds();
+  return db.select().from(orgPages)
+    .where(and(
+      eq(orgPages.visibility, "public"),
+      eq(orgPages.isSuspended, false),
+      notInArray(orgPages.id, excludedIds.length ? excludedIds : [-1]),
+    ))
+    .orderBy(desc(orgPages.followerCount), desc(orgPages.createdAt))
+    .limit(Math.max(1, Math.min(200, limit)))
+    .offset(Math.max(0, offset));
+}
+
 export async function getPageFollowRecord(pageId: number, userId: number): Promise<PageFollower | undefined> {
   const db = await getDb();
   if (!db) return undefined;
@@ -5467,6 +5571,34 @@ export async function deleteNewsFeedSource(id: number): Promise<void> {
 }
 
 // ─── People You May Know (user suggestions) ─────────────────────────────────────────────
+export async function getPeopleYouMayKnowExcludedUserIds(): Promise<number[]> {
+  const db = await getDb();
+  if (!db || !(await ensurePeopleYouMayKnowStorage())) return [];
+  const rows = await db.select({ userId: peopleYouMayKnowExclusions.userId }).from(peopleYouMayKnowExclusions);
+  return rows.map((row) => row.userId);
+}
+
+export async function excludePeopleYouMayKnowUser(userId: number, removedByUserId: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db || !(await ensurePeopleYouMayKnowStorage())) throw new Error("Suggestion removal storage is temporarily unavailable. Please try again shortly.");
+  const rows = await db.insert(peopleYouMayKnowExclusions)
+    .values({ userId, removedByUserId })
+    .onConflictDoNothing({ target: peopleYouMayKnowExclusions.userId })
+    .returning({ id: peopleYouMayKnowExclusions.id });
+  return rows.length > 0;
+}
+
+export async function getPeopleYouMayKnowAdminCandidates(limit = 100, offset = 0): Promise<Pick<User, "id" | "name" | "email" | "avatar">[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const [usersForAdmin, excludedIds] = await Promise.all([
+    getAllUsers(Math.max(1, Math.min(200, limit)), Math.max(0, offset)),
+    getPeopleYouMayKnowExcludedUserIds(),
+  ]);
+  return filterPeopleYouMayKnowCandidates(usersForAdmin as Pick<User, "id" | "name" | "avatar">[], excludedIds)
+    .map((user) => ({ id: user.id, name: user.name, email: user.email, avatar: user.avatar }));
+}
+
 export async function getSuggestedUsers(
   viewerId: number,
   limit = 6
@@ -5493,7 +5625,8 @@ export async function getSuggestedUsers(
     .where(sql`"requesterId" = ${viewerId} OR "receiverId" = ${viewerId}`)
     .catch(() => []);
   const allFriendIds = allFriendReqs.flatMap((r) => [r.a, r.b]).filter((id) => id !== viewerId);
-  const excludeIds = Array.from(new Set([viewerId, ...followedIds, ...allFriendIds]));
+  const globallyExcludedIds = await getPeopleYouMayKnowExcludedUserIds();
+  const excludeIds = Array.from(new Set([viewerId, ...followedIds, ...allFriendIds, ...globallyExcludedIds]));
 
   // Fetch candidate users
   const candidates = await db
@@ -5522,7 +5655,7 @@ export async function getSuggestedUsers(
 
   // Sort: most mutual friends first, then random for ties
   ranked.sort((a, b) => b.mutualFriends - a.mutualFriends || Math.random() - 0.5);
-  return ranked.slice(0, limit);
+  return filterPeopleYouMayKnowCandidates(ranked, globallyExcludedIds).slice(0, limit);
 }
 // ─── Org Page Posts ──────────────────────────────────────────────────────────
 export async function createOrgPagePost(data: InsertOrgPagePost): Promise<number> {

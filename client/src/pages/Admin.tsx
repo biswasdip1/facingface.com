@@ -30,6 +30,7 @@ type Tab =
   | "news_feed"
   | "email_notice"
   | "people_you_may_know"
+  | "suggested_pages"
   | "email_reminders"
   | "system_resources"
   | "posts";
@@ -104,6 +105,7 @@ export default function Admin() {
     { id: "news_feed", label: "News Feed", icon: Newspaper },
     { id: "email_notice", label: "E-mail/Notice", icon: Mail },
     { id: "people_you_may_know", label: "People You May Know", icon: Users, superOnly: true },
+    { id: "suggested_pages", label: "Suggested Pages", icon: Building2, superOnly: true },
     { id: "email_reminders", label: "Email Reminders", icon: Mail },
     { id: "system_resources", label: "System Resources", icon: HardDrive, superOnly: true },
   ];
@@ -221,6 +223,7 @@ export default function Admin() {
           </div>
         )}
         {activeTab === "people_you_may_know" && <PeopleYouMayKnowTab />}
+        {activeTab === "suggested_pages" && <SuggestedPagesTab />}
         {activeTab === "email_reminders" && <EmailRemindersTab />}
         {activeTab === "system_resources" && <SystemResourcesTab openUsers={() => setActiveTab("users")} />}
 
@@ -2387,40 +2390,120 @@ function AdvertisementsTab() {
 // ─── People You May Know Tab ──────────────────────────────────────────────────
 function PeopleYouMayKnowTab() {
   const { data: suggestions, isLoading, refetch } = trpc.admin.getPeopleYouMayKnow.useQuery({ limit: 100, offset: 0 });
+  const [removedIds, setRemovedIds] = useState<number[]>([]);
+  const [brokenAvatarIds, setBrokenAvatarIds] = useState<number[]>([]);
   const removeSuggestion = trpc.admin.removePeopleYouMayKnowSuggestion.useMutation({
-    onSuccess: () => { refetch(); toast.success("Suggestion removed."); },
-    onError: (e) => toast.error(e.message),
+    onMutate: ({ userId }) => {
+      setRemovedIds((current) => current.includes(userId) ? current : [...current, userId]);
+    },
+    onSuccess: () => {
+      refetch();
+      toast.success("Suggestion removed.");
+    },
+    onError: (error, variables) => {
+      setRemovedIds((current) => current.filter((id) => id !== variables.userId));
+      toast.error(error.message);
+    },
   });
 
+  const visibleSuggestions = (suggestions ?? []).filter((user: any) => !removedIds.includes(user.id));
   if (isLoading) return <LoadingSpinner />;
-  if (!suggestions?.length) return <EmptyState icon={Users} message="No user suggestions at this time." />;
+  if (!visibleSuggestions.length) return <EmptyState icon={Users} message="No active People You May Know suggestions." />;
 
   return (
     <div className="space-y-3">
       <div className="text-sm" style={{ color: "var(--its-text-muted)" }}>
-        Manage user suggestions shown in "People You May Know" section. Remove suggestions that are inappropriate or irrelevant.
+        Remove a member here to hide them from People You May Know across FacingFace. Their account and normal search result remain unchanged.
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {suggestions.map((user: any) => (
-          <div key={user.id} className="rounded-lg border p-4 flex flex-col items-center text-center" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }}>
-            {user.profilePicture && (
-              <img src={user.profilePicture} alt={user.name} className="w-16 h-16 rounded-full mb-2 object-cover" />
-            )}
-            <h4 className="font-semibold text-sm mb-1">{user.name}</h4>
-            <p className="text-xs mb-3" style={{ color: "var(--its-text-muted)" }}>ID: #{user.id}</p>
-            <button
-              onClick={() => { if (confirm(`Remove ${user.name} from suggestions?`)) removeSuggestion.mutate({ userId: user.id }); }}
-              className="px-3 py-1.5 rounded text-xs font-bold bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900 dark:text-red-300 w-full"
-            >
-              Remove
-            </button>
-          </div>
-        ))}
+        {visibleSuggestions.map((user: any) => {
+          const name = user.name?.trim() || "User";
+          const showImage = Boolean(user.profilePicture) && !brokenAvatarIds.includes(user.id);
+          return (
+            <div key={user.id} className="rounded-lg border p-4 flex flex-col items-center text-center" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }}>
+              {showImage ? (
+                <img src={user.profilePicture} alt={name} onError={() => setBrokenAvatarIds((current) => current.includes(user.id) ? current : [...current, user.id])} className="w-16 h-16 rounded-full mb-2 object-cover" />
+              ) : (
+                <div aria-label={`${name} profile placeholder`} className="w-16 h-16 rounded-full mb-2 flex items-center justify-center bg-gradient-to-br from-[var(--its-red)] to-[var(--its-red-light,#e57373)] text-white text-xl font-black">
+                  {name.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <h4 className="font-semibold text-sm mb-1">{name}</h4>
+              <p className="text-xs mb-3" style={{ color: "var(--its-text-muted)" }}>ID: #{user.id}</p>
+              <button
+                onClick={() => { if (confirm(`Remove ${name} from suggestions?`)) removeSuggestion.mutate({ userId: user.id }); }}
+                disabled={removeSuggestion.isPending}
+                className="px-3 py-1.5 rounded text-xs font-bold bg-red-100 text-red-700 hover:bg-red-200 disabled:opacity-50 dark:bg-red-900 dark:text-red-300 w-full"
+              >
+                Remove
+              </button>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
+
+// ─── Suggested Pages Tab ──────────────────────────────────────────────────────
+function SuggestedPagesTab() {
+  const { data: pages, isLoading, refetch } = trpc.admin.getSuggestedPages.useQuery({ limit: 100, offset: 0 });
+  const [removedIds, setRemovedIds] = useState<number[]>([]);
+  const [brokenImageIds, setBrokenImageIds] = useState<number[]>([]);
+  const removePage = trpc.admin.removeSuggestedPage.useMutation({
+    onMutate: ({ pageId }) => setRemovedIds((current) => current.includes(pageId) ? current : [...current, pageId]),
+    onSuccess: () => {
+      refetch();
+      toast.success("Page removed from Suggested Pages.");
+    },
+    onError: (error, variables) => {
+      setRemovedIds((current) => current.filter((id) => id !== variables.pageId));
+      toast.error(error.message);
+    },
+  });
+
+  const visiblePages = (pages ?? []).filter((page: any) => !removedIds.includes(page.id));
+  if (isLoading) return <LoadingSpinner />;
+  if (!visiblePages.length) return <EmptyState icon={Building2} message="No Pages are currently eligible for Suggested Pages." />;
+
+  return (
+    <div className="space-y-3">
+      <div className="text-sm" style={{ color: "var(--its-text-muted)" }}>
+        These public Pages can appear in the Feed’s Suggested Pages card. Remove a Page here to hide it from the suggestion card only; the Page stays live and searchable.
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {visiblePages.map((page: any) => {
+          const name = page.name?.trim() || "Page";
+          const imageUrl = page.coverPhoto || page.logo;
+          const showImage = Boolean(imageUrl) && !brokenImageIds.includes(page.id);
+          return (
+            <div key={page.id} className="overflow-hidden rounded-lg border" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }}>
+              <div className="h-24 bg-gradient-to-br from-blue-600 to-indigo-700">
+                {showImage ? (
+                  <img src={imageUrl} alt={`${name} cover`} onError={() => setBrokenImageIds((current) => current.includes(page.id) ? current : [...current, page.id])} className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-white/90"><Building2 size={30} /></div>
+                )}
+              </div>
+              <div className="p-3">
+                <h4 className="truncate font-semibold text-sm">{name}</h4>
+                <p className="mt-1 text-xs" style={{ color: "var(--its-text-muted)" }}>{page.followerCount?.toLocaleString?.() ?? 0} followers · /p/{page.handle}</p>
+                <button
+                  onClick={() => { if (confirm(`Remove ${name} from Suggested Pages?`)) removePage.mutate({ pageId: page.id }); }}
+                  disabled={removePage.isPending}
+                  className="mt-3 w-full rounded bg-red-100 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-200 disabled:opacity-50 dark:bg-red-900 dark:text-red-300"
+                >
+                  Remove from suggestions
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 // ─── Email Reminders Tab ──────────────────────────────────────────────────────
 function EmailRemindersTab() {

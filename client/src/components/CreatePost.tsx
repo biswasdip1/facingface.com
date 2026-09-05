@@ -1027,7 +1027,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
             onChange={(e) => setText(e.target.value)}
             placeholder={showPoll ? "Add a caption for your poll (optional)…" : "What's on your mind?"}
             rows={rows}
-            className="w-full border-0 border-b px-0 py-2 pr-8 focus:outline-none resize-none transition-all duration-200 bg-transparent"
+            className="w-full border-0 border-b px-0 py-2 focus:outline-none resize-none transition-all duration-200 bg-transparent"
             style={{
               fontSize,
               lineHeight,
@@ -1037,47 +1037,21 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
             }}
             onKeyDown={(e) => { if (e.key === "Escape") setShowEmojiPicker(false); }}
           />
-          <button
-            type="button"
-            onClick={() => setShowEmojiPicker((v) => !v)}
-            className={`absolute right-0 bottom-2 transition-colors ${showEmojiPicker ? "text-[var(--its-red)]" : "opacity-50 hover:opacity-100"}`}
-            style={{ color: hasBgColor ? selectedBg.text : undefined }}
-            title="Add emoji"
-          >
-            <Smile size={16} />
-          </button>
         </div>
-
-        {showEmojiPicker && (
-          <div
-            ref={emojiPickerRef}
-            className="absolute right-0 top-full mt-1 z-50 shadow-xl"
-            style={{ filter: "drop-shadow(0 4px 16px rgba(0,0,0,0.18))" }}
-          >
-            <Picker
-              data={data}
-              onEmojiSelect={handlePostEmojiSelect}
-              theme={emojiTheme}
-              set="native"
-              previewPosition="none"
-              skinTonePosition="none"
-              maxFrequentRows={2}
-              perLine={8}
-            />
-          </div>
-        )}
       </div>
 
 
       {/* Tag, feeling, and check-in — standard wall posts only */}
       {!isContextPost && (
-        <section className="mb-4 rounded-lg border border-border bg-muted/20 p-3">
+        <section className="relative mb-4 rounded-lg border border-border bg-muted/20 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <button type="button" onClick={() => { setShowAddToPost((open) => !open); setActivePostExtra(null); }} className="text-xs font-bold text-foreground hover:text-[var(--its-red)]">Add to your post</button>
             <div className="flex flex-wrap items-center gap-1">
               <button type="button" onClick={() => { setShowAddToPost(true); setActivePostExtra("tag"); }} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold transition-colors ${activePostExtra === "tag" || taggedFriendIds.length > 0 ? "border-blue-500 text-blue-600" : "border-border text-muted-foreground hover:text-foreground"}`} title="Tag accepted friends"><UserPlus size={14} />Tag</button>
-              <button type="button" onClick={() => { setShowAddToPost(true); setActivePostExtra("feeling"); }} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold transition-colors ${activePostExtra === "feeling" || feeling ? "border-amber-500 text-amber-600" : "border-border text-muted-foreground hover:text-foreground"}`} title="Add a feeling or activity"><Smile size={14} />Feeling</button>
               <button type="button" onClick={() => { setShowAddToPost(true); setActivePostExtra("checkin"); }} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold transition-colors ${activePostExtra === "checkin" || checkInLocation.trim() ? "border-rose-500 text-rose-600" : "border-border text-muted-foreground hover:text-foreground"}`} title="Check in to a place"><MapPin size={14} />Check in</button>
+              <button type="button" onClick={() => { setShowAddToPost(true); setActivePostExtra("feeling"); }} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold transition-colors ${activePostExtra === "feeling" || feeling ? "border-amber-500 text-amber-600" : "border-border text-muted-foreground hover:text-foreground"}`} title="Add a feeling or activity"><Smile size={14} />Feeling</button>
+              <span className="mx-1 h-1 w-1 rounded-full bg-muted-foreground/65" aria-hidden="true" />
+              <button type="button" onClick={() => setShowEmojiPicker((open) => !open)} className={`inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors ${showEmojiPicker ? "bg-[var(--its-red)] text-white" : "text-muted-foreground hover:bg-background hover:text-foreground"}`} title="Add emoji" aria-label="Add emoji"><Smile size={16} /></button>
             </div>
           </div>
           {(taggedFriendIds.length > 0 || feeling || checkInLocation.trim()) && (
@@ -1095,6 +1069,11 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
           )}
           {showAddToPost && activePostExtra === "checkin" && (
             <div className="mt-3 border-t border-border pt-3"><div className="mb-2 flex items-center justify-between"><p className="text-xs font-bold text-foreground">Check in</p><button type="button" onClick={() => setActivePostExtra(null)} className="text-xs text-muted-foreground hover:text-foreground">Close</button></div><div className="flex gap-2"><input value={checkInLocation} onChange={(event) => setCheckInLocation(event.target.value)} maxLength={160} autoFocus placeholder="Add a town, venue, or place" className="min-w-0 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-[var(--its-red)]/35" /><button type="button" onClick={() => setActivePostExtra(null)} className="rounded-md bg-[var(--its-red)] px-3 py-2 text-xs font-bold text-white">Done</button></div><p className="mt-1.5 text-[11px] text-muted-foreground">This uses a place name only. It does not share your live location.</p></div>
+          )}
+          {showEmojiPicker && (
+            <div ref={emojiPickerRef} className="absolute right-0 top-full z-50 mt-1 shadow-xl" style={{ filter: "drop-shadow(0 4px 16px rgba(0,0,0,0.18))" }}>
+              <Picker data={data} onEmojiSelect={handlePostEmojiSelect} theme={emojiTheme} set="native" previewPosition="none" skinTonePosition="none" maxFrequentRows={2} perLine={8} />
+            </div>
           )}
         </section>
       )}

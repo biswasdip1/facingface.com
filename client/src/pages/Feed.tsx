@@ -6,6 +6,7 @@ import PostCard from "@/components/PostCard";
 import LiveViewer from "@/components/LiveViewer";
 import FeedAd from "@/components/FeedAd";
 import PeopleYouMayKnow from "@/components/PeopleYouMayKnow";
+import SuggestedPages from "@/components/SuggestedPages";
 
 import { AlertTriangle, Loader2, Radio, Users, RefreshCw, Mail, Play, Eye, MessageCircle, Newspaper, ExternalLink, BadgeCheck, ChevronDown, Gift, CalendarDays, Building2, UsersRound, Megaphone, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
@@ -541,16 +542,17 @@ export default function Feed() {
               const hasMedia = !!(post.mediaUrl || post.audioUrl || (post as any).docUrl);
               const isApproachingDeletion = hasMedia && postAge > TWO_YEARS_MS * 0.95 && !scheduledDeletion;
               // Feed rotation requested by the site owner:
-              // after 4th post = advertisement, after 6th = video reel,
-              // after 8th = People You May Know, after 10th = story reel;
-              // then repeat the same pattern every 10 posts.
+              // after 4th post = advertisement, 7th = video reel,
+              // 10th = People You May Know, 14th = Story, and
+              // 16th = Suggested Pages. The pattern then repeats every 16 posts.
               const postNumber = index + 1;
-              const cycleIndex = postNumber % 10;
+              const cycleIndex = ((postNumber - 1) % 16) + 1;
               const showAd = cycleIndex === 4;
-              const showVideoReel = cycleIndex === 6;
-              const showPeopleYouMayKnow = cycleIndex === 8;
-              const showStoryReel = cycleIndex === 0;
-              const cycleSlot = Math.floor((postNumber - 1) / 10) + 1;
+              const showVideoReel = cycleIndex === 7;
+              const showPeopleYouMayKnow = cycleIndex === 10;
+              const showStoryReel = cycleIndex === 14;
+              const showSuggestedPages = cycleIndex === 16;
+              const cycleSlot = Math.floor((postNumber - 1) / 16) + 1;
 
               return (
                 <div key={post.id}>
@@ -584,6 +586,7 @@ export default function Feed() {
                       <StoryBar variant="compact" />
                     </div>
                   )}
+                  {showSuggestedPages && <SuggestedPages />}
                 </div>
               );
             })}
