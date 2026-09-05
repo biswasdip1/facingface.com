@@ -1,43 +1,101 @@
 import type { Server as SocketServer } from "socket.io";
 import { sendCallPushNotification } from "./webpush";
+import { sdk } from "./_core/sdk";
 
-// Map: userId (number) -> socket id
-const userSockets = new Map<number, string>();
+// A user can have the main website and a messaging page open at the same time.
+// Keep every authenticated connection rather than replacing one socket with another.
+const userSockets = new Map<number, Set<string>>();
+let socketServer: SocketServer | null = null;
 
-/** Check if a user currently has an active socket connection */
+export type FriendPostFlashPayload = {
+  postId: number;
+  authorId: number;
+  authorName: string;
+  authorAvatar: string | null;
+  audience: "public" | "private";
+};
+
+type FriendshipParticipant = { userId1: number; userId2: number };
+
+/** Convert durable accepted friendship rows into unique friend alert recipients. */
+export function getFriendPostAlertRecipients(authorId: number, friendships: FriendshipParticipant[]): number[] {
+  const recipients = new Set<number>();
+  for (const friendship of friendships) {
+    if (friendship.userId1 === authorId && friendship.userId2 > 0) recipients.add(friendship.userId2);
+    if (friendship.userId2 === authorId && friendship.userId1 > 0) recipients.add(friendship.userId1);
+  }
+  recipients.delete(authorId);
+  return [...recipients];
+}
+
+/** Check if a user currently has one or more active authenticated connections. */
 export function isUserOnline(userId: number): boolean {
-  return userSockets.has(userId);
+  return (userSockets.get(userId)?.size ?? 0) > 0;
+}
+
+function addUserSocket(userId: number, socketId: string) {
+  const sockets = userSockets.get(userId) ?? new Set<string>();
+  sockets.add(socketId);
+  userSockets.set(userId, sockets);
+}
+
+function removeUserSocket(userId: number, socketId: string) {
+  const sockets = userSockets.get(userId);
+  if (!sockets) return;
+  sockets.delete(socketId);
+  if (sockets.size === 0) userSockets.delete(userId);
+}
+
+function emitToUser(userId: number, event: string, payload: object) {
+  const sockets = userSockets.get(userId);
+  if (!socketServer || !sockets) return;
+  for (const socketId of sockets) socketServer.to(socketId).emit(event, payload);
 }
 
 /**
- * Attach call-signaling event handlers to an existing Socket.IO server instance.
- * Events used:
- *   call:offer   { to, from, fromName, offer, isVideo }  → forwarded to recipient
- *   call:answer  { to, answer }                          → forwarded to caller
- *   call:ice     { to, candidate }                       → forwarded to peer
- *   call:hangup  { to }                                  → forwarded to peer
+ * Sends an in-app-only flash event to accepted friends currently using
+ * FacingFace. The event deliberately carries no post text, media URLs, or
+ * link-preview data; the secure post-detail route remains the final access gate.
+ */
+export function emitFriendPostFlash(recipientIds: number[], payload: FriendPostFlashPayload) {
+  const recipientSet = new Set(recipientIds.filter((id) => Number.isInteger(id) && id > 0 && id !== payload.authorId));
+  for (const recipientId of recipientSet) emitToUser(recipientId, "post:friend-created", payload);
+}
+
+/**
+ * Attach authenticated call, direct-message and presence handlers to an
+ * existing Socket.IO server instance. The session cookie—not a client-supplied
+ * query parameter—determines which user receives targeted events.
  */
 export function initCallSignaling(io: SocketServer) {
-  io.on("connection", (socket) => {
-    // Each socket registers its userId on connect via query param
-    const rawUserId = socket.handshake.query.userId;
-    const userId = rawUserId ? Number(rawUserId) : null;
-    if (userId && !isNaN(userId)) {
-      userSockets.set(userId, socket.id);
+  socketServer = io;
+
+  io.use(async (socket, next) => {
+    try {
+      const user = await sdk.authenticateRequest(socket.request as any);
+      socket.data.userId = user.id;
+      next();
+    } catch {
+      next(new Error("Unauthorized socket connection"));
     }
+  });
+
+  io.on("connection", (socket) => {
+    const userId = Number(socket.data.userId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      socket.disconnect(true);
+      return;
+    }
+    addUserSocket(userId, socket.id);
 
     function forwardTo(toUserId: number, event: string, payload: object) {
-      const targetSocketId = userSockets.get(toUserId);
-      if (targetSocketId) {
-        io.to(targetSocketId).emit(event, payload);
-      }
+      emitToUser(toUserId, event, payload);
     }
 
-    socket.on("call:offer", (data: { to: number; from: number; fromName: string; offer: RTCSessionDescriptionInit; isVideo: boolean }) => {
-      forwardTo(data.to, "call:offer", { from: data.from, fromName: data.fromName, offer: data.offer, isVideo: data.isVideo });
-      // Send Web Push if the recipient is not currently connected via Socket.IO
-      const recipientOnline = userSockets.has(data.to);
-      if (!recipientOnline) {
+    socket.on("call:offer", (data: { to: number; from?: number; fromName: string; offer: RTCSessionDescriptionInit; isVideo: boolean }) => {
+      forwardTo(data.to, "call:offer", { from: userId, fromName: data.fromName, offer: data.offer, isVideo: data.isVideo });
+      // Send Web Push if the recipient is not currently connected via Socket.IO.
+      if (!isUserOnline(data.to)) {
         sendCallPushNotification(data.to, data.fromName, data.isVideo ? "video" : "voice").catch(() => {});
       }
     });
@@ -55,25 +113,20 @@ export function initCallSignaling(io: SocketServer) {
     });
 
     // ── DM typing indicators ──────────────────────────────────────────────────
-    socket.on("dm:typing", (data: { to: number; from: number; conversationId: number }) => {
-      forwardTo(data.to, "dm:typing", { from: data.from, conversationId: data.conversationId });
+    socket.on("dm:typing", (data: { to: number; from?: number; conversationId: number }) => {
+      forwardTo(data.to, "dm:typing", { from: userId, conversationId: data.conversationId });
     });
 
-    socket.on("dm:stopTyping", (data: { to: number; from: number; conversationId: number }) => {
-      forwardTo(data.to, "dm:stopTyping", { from: data.from, conversationId: data.conversationId });
+    socket.on("dm:stopTyping", (data: { to: number; from?: number; conversationId: number }) => {
+      forwardTo(data.to, "dm:stopTyping", { from: userId, conversationId: data.conversationId });
     });
 
     // ── Presence broadcast ────────────────────────────────────────────────────
-    // Broadcast online status to all connected sockets when a user connects
-    if (userId && !isNaN(userId)) {
-      io.emit("dm:online", { userId });
-    }
+    io.emit("dm:online", { userId });
 
     socket.on("disconnect", () => {
-      if (userId) {
-        userSockets.delete(userId);
-        io.emit("dm:offline", { userId });
-      }
+      removeUserSocket(userId, socket.id);
+      if (!isUserOnline(userId)) io.emit("dm:offline", { userId });
     });
   });
 }

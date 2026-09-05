@@ -374,6 +374,9 @@ import {
   getSuggestedUsers,
   getInactiveReminderSummary,
 } from "./db";
+import { emitFriendPostFlash, getFriendPostAlertRecipients } from "./callSignaling";
+
+
 import { stripe, getOrCreateBadgePrice } from "./stripe";
 import {
   getEmailDeliveryConfig,
@@ -779,8 +782,27 @@ const postsRouter = router({
         feeling: input.feeling ?? null,
         checkInLocation: input.checkInLocation?.trim() || null,
         audience: input.audience,
-        scheduledAt: input.scheduledAt ?? null,
+                scheduledAt: input.scheduledAt ?? null,
       });
+
+      // Notify accepted friends who are currently using FacingFace. The realtime
+      // payload contains no post text or media; opening the post always passes
+      // through the existing server-side audience access check.
+      try {
+        const friendships = await getFriends(ctx.user.id);
+        const recipientIds = getFriendPostAlertRecipients(ctx.user.id, friendships);
+        emitFriendPostFlash(recipientIds, {
+          postId,
+          authorId: ctx.user.id,
+          authorName: ctx.user.name?.trim() || "A friend",
+          authorAvatar: ctx.user.avatar ?? null,
+          audience: input.audience,
+        });
+      } catch (error) {
+        // Delivery is deliberately non-fatal: storing the post must not fail
+        // because a recipient is offline or an in-app connection ended.
+        console.error("[posts.create] Friend post alert delivery failed:", error);
+      }
 
       // Save hashtags
       if (input.text) {

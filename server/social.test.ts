@@ -131,7 +131,7 @@ describe("posts.create", () => {
 
   it("rejects a post with no text and no media", async () => {
     const caller = appRouter.createCaller(makeCtx());
-    await expect(caller.posts.create({})).rejects.toThrow("Post must have text, media, a poll, or a document");
+    await expect(caller.posts.create({})).rejects.toThrow("Post must have text, media, a poll, a document, a tag, a feeling, or a check-in.");
   });
 
   it("blocks flagged content", async () => {

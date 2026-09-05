@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { Toaster } from "@/components/ui/sonner";
+import { toast } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
-import { Route, Switch } from "wouter";
+import { Route, Switch, useLocation } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { ThemeModeProvider } from "./contexts/ThemeModeContext";
@@ -84,6 +85,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
 function AppLayout() {
   const { user } = useAuth();
+  const [, navigate] = useLocation();
 
   // ── Global incoming call state ─────────────────────────────────────────────
   const [globalIncomingCall, setGlobalIncomingCall] = useState<{
@@ -172,6 +174,38 @@ function AppLayout() {
         });
         globalSocketRef.current = socket;
 
+        socket.on("post:friend-created", (payload: {
+          postId?: number;
+          authorId?: number;
+          authorName?: string;
+          authorAvatar?: string | null;
+          audience?: "public" | "private";
+        }) => {
+          // The server selects accepted friends only and sends no post content.
+          // The direct post route performs its own authorization before display.
+          if (!Number.isInteger(payload?.postId) || !Number.isInteger(payload?.authorId) || payload.authorId === user.id) return;
+          const authorName = typeof payload.authorName === "string" && payload.authorName.trim() ? payload.authorName.trim() : "A friend";
+          toast.custom((toastId) => (
+            <button
+              type="button"
+              onClick={() => { toast.dismiss(toastId); navigate(`/post/${payload.postId}`); }}
+              className="pointer-events-auto flex w-[min(92vw,390px)] items-center gap-3 rounded-xl border border-blue-300 bg-blue-600 px-3 py-3 text-left text-white shadow-2xl transition-transform hover:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              aria-label={`Open ${authorName}'s new post`}
+            >
+              {payload.authorAvatar ? (
+                <img src={payload.authorAvatar} alt="" className="h-10 w-10 shrink-0 rounded-full border-2 border-white/80 object-cover" />
+              ) : (
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-white/80 bg-white/20 text-sm font-black">{authorName.charAt(0).toUpperCase()}</span>
+              )}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-bold">{authorName} posted something new</span>
+                <span className="mt-0.5 block text-xs text-white/85">Tap to view</span>
+              </span>
+              <span className="shrink-0 rounded-md bg-white px-2.5 py-1.5 text-xs font-bold text-blue-700">View</span>
+            </button>
+          ), { duration: 8000 });
+        });
+
         socket.on(
           "call:offer",
           ({
@@ -205,7 +239,7 @@ function AppLayout() {
       globalSocketRef.current?.disconnect();
       globalSocketRef.current = null;
     };
-  }, [user]);
+  }, [user?.id, navigate]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
