@@ -1043,30 +1043,27 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
 
       {/* Tag, feeling, and check-in — standard wall posts only */}
       {!isContextPost && (
-        <section className="relative mb-4 rounded-lg border border-border bg-muted/20 p-3">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-bold text-foreground">Add to your post</span>
-            <button
-              type="button"
-              onClick={() => {
-                setShowAddToPost((open) => !open);
-                setActivePostExtra(null);
-                setShowEmojiPicker(false);
-              }}
-              aria-label={showAddToPost ? "Close post options" : "Show post options"}
-              aria-expanded={showAddToPost}
-              className={`inline-flex h-7 w-7 items-center justify-center rounded-full border transition-colors ${showAddToPost ? "border-[var(--its-red)] bg-[var(--its-red)] text-white" : "border-border text-muted-foreground hover:bg-background hover:text-foreground"}`}
-              title={showAddToPost ? "Close options" : "Show options"}
-            >
-              <ChevronDown size={16} className={showAddToPost ? "rotate-180 transition-transform" : "transition-transform"} />
-            </button>
-          </div>
+        <section className="relative mb-2">
+          <button
+            type="button"
+            onClick={() => {
+              setShowAddToPost((open) => !open);
+              setActivePostExtra(null);
+              setShowEmojiPicker(false);
+            }}
+            aria-label={showAddToPost ? "Close post options" : "Show post options"}
+            aria-expanded={showAddToPost}
+            className={`ml-auto flex h-6 w-6 items-center justify-center rounded-full border transition-colors ${showAddToPost ? "border-[var(--its-red)] bg-[var(--its-red)] text-white" : "border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"}`}
+            title={showAddToPost ? "Close extra post options" : "More post options"}
+          >
+            <ChevronDown size={15} className={showAddToPost ? "rotate-180 transition-transform" : "transition-transform"} />
+          </button>
           {showAddToPost && (
-            <div className="mt-3 flex flex-col gap-1 border-t border-border pt-3" role="menu" aria-label="Add to your post options">
-              <button type="button" role="menuitem" onClick={() => setActivePostExtra("tag")} className={`inline-flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold transition-colors ${activePostExtra === "tag" || taggedFriendIds.length > 0 ? "bg-blue-500/10 text-blue-700" : "text-muted-foreground hover:bg-background hover:text-foreground"}`} title="Tag accepted friends"><UserPlus size={16} />Tag</button>
-              <button type="button" role="menuitem" onClick={() => setActivePostExtra("feeling")} className={`inline-flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold transition-colors ${activePostExtra === "feeling" || feeling ? "bg-amber-500/10 text-amber-700" : "text-muted-foreground hover:bg-background hover:text-foreground"}`} title="Add a feeling or activity"><Smile size={16} />Feeling</button>
-              <button type="button" role="menuitem" onClick={() => setActivePostExtra("checkin")} className={`inline-flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold transition-colors ${activePostExtra === "checkin" || checkInLocation.trim() ? "bg-rose-500/10 text-rose-700" : "text-muted-foreground hover:bg-background hover:text-foreground"}`} title="Check in to a place"><MapPin size={16} />Check in</button>
-              <button type="button" role="menuitem" onClick={() => { setShowEmojiPicker(true); setActivePostExtra(null); setShowAddToPost(false); }} className={`inline-flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold transition-colors ${showEmojiPicker ? "bg-[var(--its-red)]/10 text-[var(--its-red)]" : "text-muted-foreground hover:bg-background hover:text-foreground"}`} title="Add emoji"><Smile size={16} />Emoji</button>
+            <div className="absolute right-0 top-7 z-40 w-44 rounded-lg border border-border bg-popover p-1.5 shadow-xl" role="menu" aria-label="More post options">
+              <button type="button" role="menuitem" onClick={() => { setActivePostExtra("tag"); setShowAddToPost(false); }} className={`inline-flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-semibold transition-colors ${taggedFriendIds.length > 0 ? "bg-blue-500/10 text-blue-700" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}><UserPlus size={16} />Tag</button>
+              <button type="button" role="menuitem" onClick={() => { setActivePostExtra("feeling"); setShowAddToPost(false); }} className={`inline-flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-semibold transition-colors ${feeling ? "bg-amber-500/10 text-amber-700" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}><Smile size={16} />Feeling</button>
+              <button type="button" role="menuitem" onClick={() => { setActivePostExtra("checkin"); setShowAddToPost(false); }} className={`inline-flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-semibold transition-colors ${checkInLocation.trim() ? "bg-rose-500/10 text-rose-700" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}><MapPin size={16} />Check in</button>
+              <button type="button" role="menuitem" onClick={() => { setShowEmojiPicker(true); setActivePostExtra(null); setShowAddToPost(false); }} className="inline-flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"><Smile size={16} />Emoji</button>
             </div>
           )}
           {(taggedFriendIds.length > 0 || feeling || checkInLocation.trim()) && (
@@ -1076,13 +1073,13 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
               {checkInLocation.trim() && <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/10 px-2 py-1 font-semibold text-rose-700"><MapPin size={12} />{checkInLocation.trim()} <button type="button" onClick={() => setCheckInLocation("")} aria-label="Remove check-in"><X size={12} /></button></span>}
             </div>
           )}
-          {showAddToPost && activePostExtra === "tag" && (
+          {activePostExtra === "tag" && (
             <div className="mt-3 border-t border-border pt-3"><div className="mb-2 flex items-center justify-between"><p className="text-xs font-bold text-foreground">Tag accepted friends <span className="font-normal text-muted-foreground">(up to 10)</span></p><button type="button" onClick={() => setActivePostExtra(null)} className="text-xs text-muted-foreground hover:text-foreground">Close</button></div>{acceptedFriends?.length ? <div className="grid max-h-40 gap-1 overflow-y-auto sm:grid-cols-2">{acceptedFriends.map((row) => { const friend = row.friend; if (!friend) return null; const selected = taggedFriendIds.includes(friend.id); return <label key={friend.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-background"><input type="checkbox" checked={selected} onChange={() => setTaggedFriendIds((current) => selected ? current.filter((id) => id !== friend.id) : current.length < 10 ? [...current, friend.id] : current)} /><span className="min-w-0 truncate">{friend.name ?? "Friend"}</span></label>; })}</div> : <p className="text-xs text-muted-foreground">You can tag accepted friends after connecting with them.</p>}</div>
           )}
-          {showAddToPost && activePostExtra === "feeling" && (
+          {activePostExtra === "feeling" && (
             <div className="mt-3 border-t border-border pt-3"><div className="mb-2 flex items-center justify-between"><p className="text-xs font-bold text-foreground">How are you feeling or what are you doing?</p><button type="button" onClick={() => setActivePostExtra(null)} className="text-xs text-muted-foreground hover:text-foreground">Close</button></div><div className="grid gap-1 sm:grid-cols-2">{POST_FEELINGS.map((item) => <button key={item.value} type="button" onClick={() => { setFeeling(item.value); setActivePostExtra(null); }} className={`flex items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors ${feeling === item.value ? "bg-amber-500/15 text-foreground" : "hover:bg-background text-muted-foreground"}`}><span>{item.emoji}</span><span>{item.label}</span></button>)}</div></div>
           )}
-          {showAddToPost && activePostExtra === "checkin" && (
+          {activePostExtra === "checkin" && (
             <div className="mt-3 border-t border-border pt-3"><div className="mb-2 flex items-center justify-between"><p className="text-xs font-bold text-foreground">Check in</p><button type="button" onClick={() => setActivePostExtra(null)} className="text-xs text-muted-foreground hover:text-foreground">Close</button></div><div className="flex gap-2"><input value={checkInLocation} onChange={(event) => setCheckInLocation(event.target.value)} maxLength={160} autoFocus placeholder="Add a town, venue, or place" className="min-w-0 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-[var(--its-red)]/35" /><button type="button" onClick={() => setActivePostExtra(null)} className="rounded-md bg-[var(--its-red)] px-3 py-2 text-xs font-bold text-white">Done</button></div><p className="mt-1.5 text-[11px] text-muted-foreground">This uses a place name only. It does not share your live location.</p></div>
           )}
           {showEmojiPicker && (
