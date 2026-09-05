@@ -8,7 +8,7 @@ import {
   Trash2, CheckCircle, Ban, UserCheck, BadgeCheck, XCircle, ClipboardList,
   ShoppingBag, Eye, AlertTriangle, FileImage, FileVideo, FileAudio, FileText,
   Globe, UsersRound, MessageSquareWarning, Search, BarChart2, Radio, Newspaper,
-  Mail, HardDrive, Activity, ExternalLink, RefreshCw, ShieldAlert,
+  Mail, HardDrive, Activity, ExternalLink, RefreshCw, ShieldAlert, Building2,
 } from "lucide-react";
 import { BroadcastComposer, BroadcastsList } from "@/components/BroadcastUI";
 import { toast } from "sonner";
