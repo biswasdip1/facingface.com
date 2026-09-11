@@ -508,6 +508,7 @@ export const coverPhotos = pgTable("cover_photos", {
   userId: integer("userId").notNull(),
   url: text("url").notNull(),
   storageKey: varchar("storageKey", { length: 500 }).notNull(),
+  cropY: integer("cropY").default(50).notNull(),
   isActive: boolean("isActive").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });

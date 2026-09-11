@@ -659,6 +659,73 @@ export async function ensureLegacyRuntimeSchema(): Promise<void> {
       }
     }
 
+    if (!(await relationExists("profile_photos"))) {
+      await db.execute(sql`
+        CREATE TABLE "profile_photos" (
+          "id" serial PRIMARY KEY NOT NULL,
+          "userId" integer NOT NULL,
+          "url" text NOT NULL,
+          "storageKey" varchar(500) NOT NULL,
+          "isActive" boolean NOT NULL DEFAULT false,
+          "createdAt" timestamp DEFAULT now() NOT NULL
+        )
+      `);
+    }
+    // Preserve legacy current photos in history before new uploads begin using
+    // the dedicated albums. The legacy marker avoids unsafe file deletion for
+    // old media while still allowing the owner to switch back to the image.
+    await db.execute(sql`
+      INSERT INTO "profile_photos" ("userId", "url", "storageKey", "isActive")
+      SELECT u."id", u."avatar", CONCAT('legacy-profile-', u."id"), true
+      FROM "users" u
+      WHERE u."avatar" IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM "profile_photos" p
+          WHERE p."userId" = u."id" AND p."url" = u."avatar"
+        )
+    `);
+    const profilePhotoIndexes = await existingIndexNames("profile_photos");
+    if (!profilePhotoIndexes.has("profile_photos_user_created_idx")) {
+      await db.execute(sql`CREATE INDEX "profile_photos_user_created_idx" ON "profile_photos" ("userId", "createdAt" DESC)`);
+    }
+
+    if (!(await relationExists("cover_photos"))) {
+      await db.execute(sql`
+        CREATE TABLE "cover_photos" (
+          "id" serial PRIMARY KEY NOT NULL,
+          "userId" integer NOT NULL,
+          "url" text NOT NULL,
+          "storageKey" varchar(500) NOT NULL,
+          "cropY" integer NOT NULL DEFAULT 50,
+          "isActive" boolean NOT NULL DEFAULT false,
+          "createdAt" timestamp DEFAULT now() NOT NULL
+        )
+      `);
+    } else {
+      const coverPhotoColumns = await existingColumns("cover_photos");
+      if (!coverPhotoColumns.has("cropY")) {
+        await db.execute(sql`ALTER TABLE "cover_photos" ADD COLUMN "cropY" integer NOT NULL DEFAULT 50`);
+      } else {
+        await db.execute(sql`UPDATE "cover_photos" SET "cropY" = 50 WHERE "cropY" IS NULL`);
+        await db.execute(sql`ALTER TABLE "cover_photos" ALTER COLUMN "cropY" SET DEFAULT 50`);
+        await db.execute(sql`ALTER TABLE "cover_photos" ALTER COLUMN "cropY" SET NOT NULL`);
+      }
+    }
+    await db.execute(sql`
+      INSERT INTO "cover_photos" ("userId", "url", "storageKey", "cropY", "isActive")
+      SELECT u."id", u."coverPhoto", CONCAT('legacy-cover-', u."id"), COALESCE(u."coverCropY", 50), true
+      FROM "users" u
+      WHERE u."coverPhoto" IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM "cover_photos" c
+          WHERE c."userId" = u."id" AND c."url" = u."coverPhoto"
+        )
+    `);
+    const coverPhotoIndexes = await existingIndexNames("cover_photos");
+    if (!coverPhotoIndexes.has("cover_photos_user_created_idx")) {
+      await db.execute(sql`CREATE INDEX "cover_photos_user_created_idx" ON "cover_photos" ("userId", "createdAt" DESC)`);
+    }
+
     if (await relationExists("posts")) {
       const postColumns = await existingColumns("posts");
       if (!postColumns.has("pageId")) {
@@ -3056,8 +3123,20 @@ export async function deleteProfilePhoto(photoId: number, userId: number): Promi
   const [photo] = await db.select().from(profilePhotos).where(and(eq(profilePhotos.id, photoId), eq(profilePhotos.userId, userId))).limit(1);
   if (!photo) return null;
   await db.delete(profilePhotos).where(and(eq(profilePhotos.id, photoId), eq(profilePhotos.userId, userId)));
-  // If it was active, clear user avatar
-  if (photo.isActive) await db.update(users).set({ avatar: null }).where(eq(users.id, userId));
+  // If the active image is removed, automatically return to the newest saved
+  // image instead of leaving the profile without a picture.
+  if (photo.isActive) {
+    const [replacement] = await db.select().from(profilePhotos)
+      .where(eq(profilePhotos.userId, userId))
+      .orderBy(desc(profilePhotos.createdAt))
+      .limit(1);
+    if (replacement) {
+      await db.update(profilePhotos).set({ isActive: true }).where(eq(profilePhotos.id, replacement.id));
+      await db.update(users).set({ avatar: replacement.url }).where(eq(users.id, userId));
+    } else {
+      await db.update(users).set({ avatar: null }).where(eq(users.id, userId));
+    }
+  }
   return photo.storageKey;
 }
 
@@ -3080,10 +3159,11 @@ export async function getCoverPhotos(userId: number): Promise<CoverPhoto[]> {
     .orderBy(desc(coverPhotos.createdAt));
 }
 
-export async function addCoverPhoto(data: { userId: number; url: string; storageKey: string }): Promise<number> {
+export async function addCoverPhoto(data: { userId: number; url: string; storageKey: string; cropY?: number }): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("DB unavailable");
-  const [row] = await db.insert(coverPhotos).values({ ...data, isActive: false }).returning({ id: coverPhotos.id });
+  const cropY = Math.max(0, Math.min(100, Math.round(data.cropY ?? 50)));
+  const [row] = await db.insert(coverPhotos).values({ ...data, cropY, isActive: false }).returning({ id: coverPhotos.id });
   return row?.id ?? 0;
 }
 
@@ -3092,9 +3172,9 @@ export async function setActiveCoverPhoto(photoId: number, userId: number): Prom
   if (!db) return;
   await db.update(coverPhotos).set({ isActive: false }).where(eq(coverPhotos.userId, userId));
   await db.update(coverPhotos).set({ isActive: true }).where(and(eq(coverPhotos.id, photoId), eq(coverPhotos.userId, userId)));
-  // Sync user.coverPhoto with the active cover URL
+  // Sync both the image and its saved framing when history is switched.
   const [photo] = await db.select().from(coverPhotos).where(and(eq(coverPhotos.id, photoId), eq(coverPhotos.userId, userId))).limit(1);
-  if (photo) await db.update(users).set({ coverPhoto: photo.url }).where(eq(users.id, userId));
+  if (photo) await db.update(users).set({ coverPhoto: photo.url, coverCropY: photo.cropY ?? 50 }).where(eq(users.id, userId));
 }
 
 export async function deleteCoverPhoto(photoId: number, userId: number): Promise<string | null> {
@@ -3103,7 +3183,18 @@ export async function deleteCoverPhoto(photoId: number, userId: number): Promise
   const [photo] = await db.select().from(coverPhotos).where(and(eq(coverPhotos.id, photoId), eq(coverPhotos.userId, userId))).limit(1);
   if (!photo) return null;
   await db.delete(coverPhotos).where(and(eq(coverPhotos.id, photoId), eq(coverPhotos.userId, userId)));
-  if (photo.isActive) await db.update(users).set({ coverPhoto: null }).where(eq(users.id, userId));
+  if (photo.isActive) {
+    const [replacement] = await db.select().from(coverPhotos)
+      .where(eq(coverPhotos.userId, userId))
+      .orderBy(desc(coverPhotos.createdAt))
+      .limit(1);
+    if (replacement) {
+      await db.update(coverPhotos).set({ isActive: true }).where(eq(coverPhotos.id, replacement.id));
+      await db.update(users).set({ coverPhoto: replacement.url, coverCropY: replacement.cropY ?? 50 }).where(eq(users.id, userId));
+    } else {
+      await db.update(users).set({ coverPhoto: null, coverCropY: 50 }).where(eq(users.id, userId));
+    }
+  }
   return photo.storageKey;
 }
 

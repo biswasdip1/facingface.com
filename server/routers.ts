@@ -2945,14 +2945,14 @@ const photosRouter = router({
     }),
 
   uploadCoverPhoto: protectedProcedure
-    .input(z.object({ dataUrl: z.string(), mimeType: z.string().default("image/jpeg") }))
+    .input(z.object({ dataUrl: z.string(), mimeType: z.string().default("image/jpeg"), cropY: z.number().min(0).max(100).optional() }))
     .mutation(async ({ ctx, input }) => {
       const base64 = input.dataUrl.replace(/^data:[^;]+;base64,/, "");
       const rawCoverBuf = Buffer.from(base64, "base64");
       const { buffer: buffer } = await compressCover(rawCoverBuf);
       const key = `cover-photos/${ctx.user.id}/${Date.now()}.jpg`;
       const { url } = await storagePut(key, buffer, "image/jpeg");
-      const id = await addCoverPhoto({ userId: ctx.user.id, url, storageKey: key });
+      const id = await addCoverPhoto({ userId: ctx.user.id, url, storageKey: key, cropY: input.cropY });
       // Auto-activate: immediately set as the current cover photo
       await setActiveCoverPhoto(id, ctx.user.id);
       return { id, url };

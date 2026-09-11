@@ -149,23 +149,6 @@ export default function Profile() {
   const [coverUploading, setCoverUploading] = useState(false);
   const avatarRef = useRef<HTMLInputElement>(null);
   const coverRef = useRef<HTMLInputElement>(null);
-  const coverContainerRef = useRef<HTMLDivElement>(null);
-  const [parallaxY, setParallaxY] = useState(0);
-  useEffect(() => {
-    const handleScroll = () => {
-      if (!coverContainerRef.current) return;
-      const rect = coverContainerRef.current.getBoundingClientRect();
-      // Only apply parallax when the cover is visible
-      if (rect.bottom > 0 && rect.top < window.innerHeight) {
-        // Shift the image at 40% of the scroll speed
-        const scrolled = -rect.top * 0.4;
-        setParallaxY(Math.max(-40, Math.min(40, scrolled)));
-      }
-    };
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
-
   const { data: profileData, isLoading: profileLoading } = trpc.users.getProfile.useQuery(
     { userId: targetId! },
     { enabled: !!targetId }
@@ -258,7 +241,19 @@ export default function Profile() {
     onError: (err) => toast.error(err.message),
   });
 
-  const uploadMedia = trpc.media.upload.useMutation();
+  const uploadProfilePhotoHistory = trpc.photos.uploadProfilePhoto.useMutation({
+    onSuccess: () => {
+      utils.photos.listProfilePhotos.invalidate({ userId: targetId! });
+      utils.users.getProfile.invalidate({ userId: targetId! });
+      utils.auth.me.invalidate();
+    },
+  });
+  const uploadCoverPhotoHistory = trpc.photos.uploadCoverPhoto.useMutation({
+    onSuccess: () => {
+      utils.photos.listCoverPhotos.invalidate({ userId: targetId! });
+      utils.users.getProfile.invalidate({ userId: targetId! });
+    },
+  });
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -278,14 +273,8 @@ export default function Profile() {
     if (!avatarCropFile) return;
     setUploading(true);
     try {
-      const base64 = await fileToBase64(avatarCropFile);
-      const { url } = await uploadMedia.mutateAsync({
-        filename: avatarCropFile.name,
-        contentType: avatarCropFile.type,
-        base64,
-        mediaType: "image",
-      });
-      await updateProfile.mutateAsync({ avatar: url });
+      const dataUrl = await fileToBase64(avatarCropFile);
+      await uploadProfilePhotoHistory.mutateAsync({ dataUrl, mimeType: avatarCropFile.type });
       setAvatarCropSrc(null);
       setAvatarCropFile(null);
       toast.success("Profile photo updated!");
@@ -313,18 +302,8 @@ export default function Profile() {
     if (!cropFile) return;
     setCoverUploading(true);
     try {
-      const base64 = await fileToBase64(cropFile);
-      const { url } = await uploadMedia.mutateAsync({
-        filename: cropFile.name,
-        contentType: cropFile.type,
-        base64,
-        mediaType: "image",
-      });
-      // Store the crop position as a CSS object-position value in the URL via a hash
-      // We store position in the profile as-is; the display uses cropPosition from state
-      await updateProfile.mutateAsync({ coverPhoto: url });
-      // Persist crop position locally so the cover displays correctly
-      try { localStorage.setItem(`ff_cover_crop_${targetId}`, String(cropPosition.y)); } catch { /* ignore */ }
+      const dataUrl = await fileToBase64(cropFile);
+      await uploadCoverPhotoHistory.mutateAsync({ dataUrl, mimeType: cropFile.type, cropY: cropPosition.y });
       toast.success("Cover photo updated.");
       setCropSrc(null);
       setCropFile(null);
@@ -423,7 +402,7 @@ export default function Profile() {
   const savedCropY = user.coverCropY ?? (() => { try { return Number(localStorage.getItem(`ff_cover_crop_${targetId}`)) || 50; } catch { return 50; } })();
 
   return (
-    <div className="container py-8">
+    <div className="container py-6 sm:py-8">
       {birthdayDialogOpen && isOwnProfile && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="birthday-dialog-title">
           <div className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-2xl">
@@ -440,7 +419,7 @@ export default function Profile() {
           </div>
         </div>
       )}
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-4xl mx-auto">
 
         {/* ── Avatar Lightbox ── */}
         {avatarLightboxOpen && user?.avatar && (
@@ -577,11 +556,10 @@ export default function Profile() {
         )}
 
         {/* Profile header */}
-        <div className="bg-card rounded-2xl shadow-sm overflow-hidden mb-5">
+        <div className="bg-card rounded-3xl border border-border/70 shadow-sm overflow-hidden mb-5">
           {/* Cover photo */}
           <div
-            ref={coverContainerRef}
-            className={`h-40 sm:h-48 bg-primary relative overflow-hidden group ${
+            className={`h-48 sm:h-60 lg:h-64 bg-primary relative overflow-hidden group ${
               isOwnProfile && !user.coverPhoto ? "cursor-pointer" : user.coverPhoto ? "cursor-pointer" : ""
             }`}
             onClick={
@@ -600,11 +578,6 @@ export default function Profile() {
                 className="w-full h-full object-cover"
                 style={{
                   objectPosition: `center ${savedCropY}%`,
-                  transform: `translateY(${parallaxY}px)`,
-                  willChange: "transform",
-                  transition: "transform 0.05s linear",
-                  height: "120%",
-                  marginTop: "-10%",
                 }}
               />
             ) : (
@@ -661,9 +634,9 @@ export default function Profile() {
           </div>
 
           {/* Avatar + info */}
-          <div className="px-5 pb-5">
+          <div className="px-5 pb-6 sm:px-7 sm:pb-7">
             {/* Avatar row — overlaps cover photo with negative margin */}
-            <div className="-mt-12 mb-2">
+            <div className="-mt-16 mb-3">
               {/* Avatar — with gradient story ring when user has active stories */}
               <div className="relative inline-block">
                 {/* Story ring */}
@@ -673,7 +646,7 @@ export default function Profile() {
                     style={{
                       background: "linear-gradient(135deg, #f97316 0%, #e63329 40%, #9333ea 100%)",
                       padding: 2,
-                      borderRadius: 0,
+                      borderRadius: "50%",
                     }}
                   />
                 )}
@@ -687,13 +660,13 @@ export default function Profile() {
                   <img
                     src={user.avatar}
                     alt={user.name ?? ""}
-                    className="w-24 h-24 object-cover border-4 border-white rounded-full relative z-20 cursor-pointer hover:brightness-90 transition-all shadow-md"
+                    className="h-28 w-28 sm:h-32 sm:w-32 object-cover border-4 border-white rounded-full relative z-20 cursor-pointer hover:brightness-90 transition-all shadow-lg"
                     onClick={() => setAvatarLightboxOpen(true)}
                     title="View profile photo"
                   />
                 ) : (
                   <div
-                    className={`w-24 h-24 bg-primary border-4 border-white rounded-full flex flex-col items-center justify-center gap-0.5 shadow-md ${isOwnProfile ? "cursor-pointer group/avatar hover:bg-[var(--its-red)] transition-colors" : ""}`}
+                    className={`h-28 w-28 sm:h-32 sm:w-32 bg-primary border-4 border-white rounded-full flex flex-col items-center justify-center gap-0.5 shadow-lg ${isOwnProfile ? "cursor-pointer group/avatar hover:bg-[var(--its-red)] transition-colors" : ""}`}
                     onClick={isOwnProfile ? () => avatarRef.current?.click() : undefined}
                     title={isOwnProfile ? "Add profile photo" : undefined}
                   >
@@ -1019,7 +992,7 @@ export default function Profile() {
               </div>
             ) : (
               <>
-                <h1 className="text-xl font-black text-foreground tracking-tight mb-1 flex items-center gap-2">
+                <h1 className="text-2xl sm:text-3xl font-black text-foreground tracking-tight mb-1 flex items-center gap-2">
                   {user.name ?? "Anonymous"}
                   {user.isVerified && <span title="Verified"><BadgeCheck className="w-5 h-5 text-blue-500 flex-shrink-0" /></span>}
                 </h1>
@@ -1271,9 +1244,20 @@ export default function Profile() {
 
         {/* Story Highlights */}
         <HighlightsSection userId={targetId!} isOwnProfile={isOwnProfile} />
-        {/* Photo Albums */}
-        <ProfilePhotoAlbum userId={targetId!} isOwnProfile={isOwnProfile} />
-        <CoverPhotoAlbum userId={targetId!} isOwnProfile={isOwnProfile} />
+        {/* Saved profile and cover choices stay available without crowding the profile. */}
+        <details className="group mb-4 overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-bold text-foreground hover:bg-muted/40">
+            <Images size={16} className="text-[var(--its-red)]" />
+            <span>Profile &amp; Cover History</span>
+            <span className="ml-auto text-xs font-medium text-muted-foreground">Saved choices</span>
+            <span className="text-muted-foreground transition-transform group-open:rotate-180">⌄</span>
+          </summary>
+          <div className="border-t border-border/70 px-3 pb-3 pt-3 sm:px-4">
+            <p className="mb-3 text-xs leading-relaxed text-muted-foreground">Your previous profile and cover photos remain available here. Choose any saved image to switch back, or remove only the ones you no longer want.</p>
+            <ProfilePhotoAlbum userId={targetId!} isOwnProfile={isOwnProfile} />
+            <CoverPhotoAlbum userId={targetId!} isOwnProfile={isOwnProfile} />
+          </div>
+        </details>
         {/* Passkey Manager — only for own profile */}
         {isOwnProfile && <PasskeyManager />}
         {/* Content Tabs */}
@@ -1521,10 +1505,6 @@ function CoverPhotoAlbum({ userId, isOwnProfile }: { userId: number; isOwnProfil
     onSuccess: () => { utils.photos.listCoverPhotos.invalidate({ userId }); utils.users.getProfile.invalidate({ userId }); toast.success("Photo deleted."); },
     onError: (e) => toast.error(e.message),
   });
-  const updateCoverPosition = trpc.users.updateProfile.useMutation({
-    onSuccess: () => { utils.users.getProfile.invalidate({ userId }); },
-  });
-
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1542,13 +1522,9 @@ function CoverPhotoAlbum({ userId, isOwnProfile }: { userId: number; isOwnProfil
     setUploading(true);
     try {
       const dataUrl = await fileToBase64(cropFileCP);
-      // Encode the crop position into the URL as a fragment so we can restore it
-      const result = await uploadMutation.mutateAsync({ dataUrl, mimeType: cropFileCP.type });
-      // Save crop position to DB via coverCropY field on user
-      await updateCoverPosition.mutateAsync({ coverCropY: cropPosCP.y });
+      await uploadMutation.mutateAsync({ dataUrl, mimeType: cropFileCP.type, cropY: cropPosCP.y });
       setCropSrcCP(null);
       setCropFileCP(null);
-      void result;
     } catch { toast.error("Upload failed."); }
     finally { setUploading(false); }
   };
@@ -1712,14 +1688,16 @@ function PasskeyManager() {
   };
 
   return (
-    <div className="bg-card rounded-2xl shadow-sm p-6 mt-4 mb-4">
-      <div className="flex items-center gap-3 mb-4">
-        <span className="its-accent" />
-        <h2 className="text-xs font-black tracking-widest uppercase text-foreground">Passkeys & Biometrics</h2>
-        <div className="flex-1 its-divider" />
-      </div>
-      <p className="text-sm text-muted-foreground mb-4">
-        Sign in instantly with Face ID, Touch ID, fingerprint, or Windows Hello — no password required.
+    <details className="group mb-4 overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-xs font-bold text-muted-foreground hover:bg-muted/40">
+        <Fingerprint size={15} className="text-muted-foreground" />
+        <span>Security &amp; Passkeys</span>
+        <span className="ml-auto text-[11px] font-medium text-muted-foreground">Optional</span>
+        <span className="transition-transform group-open:rotate-180">⌄</span>
+      </summary>
+      <div className="border-t border-border/70 px-4 pb-4 pt-4">
+      <p className="mb-4 text-xs leading-relaxed text-muted-foreground">
+        Use Face ID, Touch ID, fingerprint, or Windows Hello for quicker sign-in when you choose to add a passkey.
       </p>
       {error && <p className="text-xs text-red-500 mb-3">{error}</p>}
       {success && <p className="text-xs text-green-600 mb-3">{success}</p>}
@@ -1770,7 +1748,8 @@ function PasskeyManager() {
           </div>
         </>
       )}
-    </div>
+      </div>
+    </details>
   );
 }
 

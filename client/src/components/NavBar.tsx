@@ -846,12 +846,12 @@ export default function NavBar() {
         <Link href="/" className="hidden sm:flex items-center gap-2 no-underline flex-shrink-0">
           <span
             className="flex items-center justify-center font-black text-xs tracking-tight select-none flex-shrink-0"
-            style={{ width: 28, height: 28, backgroundColor: "#E63329", color: "#ffffff", fontFamily: "inherit" }}
+            style={{ width: 30, height: 30, backgroundColor: "#E63329", color: "#ffffff", fontFamily: "inherit" }}
           >
             FF
           </span>
           <span
-            className="hidden sm:block font-black text-sm select-none whitespace-nowrap"
+            className="hidden sm:block font-black text-sm xl:text-base select-none whitespace-nowrap"
             style={{ color: "var(--its-text-primary)", letterSpacing: "-0.02em" }}
           >
             FacingFace<span
@@ -880,7 +880,7 @@ export default function NavBar() {
                   navigate(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
                 }
               }}
-              className="bg-transparent outline-none text-xs w-full"
+              className="bg-transparent outline-none text-xs xl:text-sm w-full"
               style={{ color: "var(--its-text-primary)", fontFamily: "inherit" }}
             />
             {searchQuery && (
@@ -944,7 +944,7 @@ export default function NavBar() {
                       window.scrollTo({ top: 0, behavior: "smooth" });
                     }
                   }}
-                  className="relative flex flex-col items-center justify-center px-2 sm:px-3 xl:px-3.5 h-16 text-[9px] font-bold tracking-widest uppercase transition-colors no-underline"
+                  className="relative flex flex-col items-center justify-center px-2 sm:px-3 xl:px-3.5 h-16 text-[9px] xl:text-[10px] font-bold tracking-widest uppercase transition-colors no-underline"
                   style={{
                     color: isSuperAdminItem ? "#b45309" : isActive ? "var(--its-text-primary)" : "var(--its-text-muted)",
                     borderBottom: isActive ? `2px solid ${isSuperAdminItem ? "#d97706" : "var(--its-text-primary)"}` : "2px solid transparent",
@@ -957,7 +957,7 @@ export default function NavBar() {
                     {isProfile && user ? (
                       <DesktopAvatar user={user} isActive={isActive} />
                     ) : (
-                      <Icon size={18} strokeWidth={isSuperAdminItem || isActive ? 2.5 : 1.5} color={isSuperAdminItem ? "#d97706" : undefined} />
+                      <Icon size={18} className="xl:h-5 xl:w-5" strokeWidth={isSuperAdminItem || isActive ? 2.5 : 1.5} color={isSuperAdminItem ? "#d97706" : undefined} />
                     )}
                     {label === "Notifications" && unreadCount > 0 && (
                       <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full" style={{ backgroundColor: "var(--its-red)" }} />
@@ -1000,7 +1000,7 @@ export default function NavBar() {
             <Link
               href="/admin"
               title="Open Admin panel"
-              className="h-9 inline-flex items-center gap-1.5 px-2.5 rounded text-[10px] font-bold uppercase tracking-wide no-underline transition-colors"
+              className="h-9 inline-flex items-center gap-1.5 px-2.5 rounded text-[10px] xl:text-xs font-bold uppercase tracking-wide no-underline transition-colors"
               style={{ color: "#b45309", backgroundColor: "rgba(245, 158, 11, 0.12)", border: "1px solid rgba(245, 158, 11, 0.32)" }}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "rgba(245, 158, 11, 0.22)")}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "rgba(245, 158, 11, 0.12)")}
