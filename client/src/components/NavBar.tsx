@@ -715,7 +715,7 @@ export default function NavBar() {
         </div>
       )}
 
-      <div className="container flex items-center h-16 gap-0 sm:gap-2">
+      <div className="container ff-wide-shell flex items-center h-16 gap-0 sm:gap-2">
 
         {/* ══════════════════════════════════════════════
             MOBILE LAYOUT (hidden on sm+)
@@ -862,7 +862,7 @@ export default function NavBar() {
         </Link>
 
         {/* Desktop Search bar */}
-        <div ref={searchRef} className="relative hidden lg:flex items-center flex-1 max-w-xs">
+        <div ref={searchRef} className="relative hidden lg:flex items-center flex-1 max-w-xs xl:max-w-sm 2xl:max-w-md">
           <div
             className="flex items-center gap-2 px-3 py-1.5 border w-full"
             style={{ borderColor: "var(--its-border)", backgroundColor: "var(--its-surface)" }}
@@ -944,7 +944,7 @@ export default function NavBar() {
                       window.scrollTo({ top: 0, behavior: "smooth" });
                     }
                   }}
-                  className="relative flex flex-col items-center justify-center px-2 sm:px-3 h-16 text-[9px] font-bold tracking-widest uppercase transition-colors no-underline"
+                  className="relative flex flex-col items-center justify-center px-2 sm:px-3 xl:px-3.5 h-16 text-[9px] font-bold tracking-widest uppercase transition-colors no-underline"
                   style={{
                     color: isSuperAdminItem ? "#b45309" : isActive ? "var(--its-text-primary)" : "var(--its-text-muted)",
                     borderBottom: isActive ? `2px solid ${isSuperAdminItem ? "#d97706" : "var(--its-text-primary)"}` : "2px solid transparent",

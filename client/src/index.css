@@ -342,6 +342,20 @@
       padding-right: 2rem;
       max-width: 1280px;
     }
+
+    /* Feed and top navigation only: give wide desktop screens a balanced
+       three-column community layout without stretching other pages. */
+    .ff-wide-shell {
+      max-width: 1440px;
+    }
+  }
+
+  @media (min-width: 1536px) {
+    .ff-wide-shell {
+      max-width: 1520px;
+      padding-left: 2.5rem;
+      padding-right: 2.5rem;
+    }
   }
 
   .its-btn {

@@ -314,7 +314,7 @@ export default function Feed() {
   const TWO_YEARS_MS = 2 * 365 * 24 * 60 * 60 * 1000;
 
   return (
-    <div className="container py-8" ref={containerRef}>
+    <div className="container ff-wide-shell py-6 xl:py-8" ref={containerRef}>
       {/* ── Pull-to-refresh indicator (mobile only) ── */}
       {(pullDistance > 0 || isRefreshing) && (
         <div
@@ -334,8 +334,8 @@ export default function Feed() {
           </div>
         </div>
       )}
-      <div className="mx-auto grid max-w-7xl grid-cols-1 gap-5 lg:grid-cols-[220px_minmax(0,680px)_340px]">
-        <aside className="hidden lg:block sticky top-24 h-fit rounded-sm border border-slate-200 bg-sky-50/70 p-3 text-sm shadow-sm">
+      <div className="mx-auto grid max-w-[1440px] grid-cols-1 gap-5 lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[250px_minmax(0,700px)_320px] 2xl:grid-cols-[260px_minmax(0,720px)_340px] xl:gap-6">
+        <aside className="hidden lg:block sticky top-24 h-fit rounded-lg border border-slate-200 bg-sky-50/70 p-3 text-sm shadow-sm">
           <Link href="/subscription" className="flex items-center gap-2 border-b border-sky-100 px-2 py-3 font-semibold text-slate-700 hover:text-[var(--its-red)]">
             <BadgeCheck size={17} className="shrink-0 text-emerald-600" /> Get Verified
           </Link>
@@ -606,7 +606,7 @@ export default function Feed() {
         ) : null}
         </main>
 
-        <div className="hidden xl:block">
+        <div className="hidden xl:block min-w-0">
           <RightNewsFeed />
         </div>
       </div>
