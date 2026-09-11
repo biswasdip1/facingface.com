@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { MessageCircle, Minus, Send, Smile, X } from "lucide-react";
+import { MessageCircle, Minus, Phone, Send, Smile, Video, X } from "lucide-react";
+import CallModal from "@/components/CallModal";
 
 type Peer = {
   id: number;
@@ -19,6 +20,10 @@ type ChatWindowState = {
 type OpenChatDetail = {
   conversationId: number;
   peer?: Peer;
+};
+
+type OutgoingCall = Peer & {
+  isVideo: boolean;
 };
 
 function initials(name?: string | null) {
@@ -40,6 +45,7 @@ function FloatingConversation({
   onMinimize,
   onRestore,
   onClose,
+  onStartCall,
 }: {
   conversationId: number;
   peer: Peer;
@@ -48,6 +54,7 @@ function FloatingConversation({
   onMinimize: () => void;
   onRestore: () => void;
   onClose: () => void;
+  onStartCall: (isVideo: boolean) => void;
 }) {
   const { user } = useAuth();
   const utils = trpc.useUtils();
@@ -130,6 +137,12 @@ function FloatingConversation({
           <p className="truncate text-sm font-black">{peer.name}</p>
           <p className="text-xs text-muted-foreground">Direct message</p>
         </div>
+        <button type="button" onClick={() => onStartCall(false)} className="rounded-full p-1.5 text-blue-600 transition-colors hover:bg-blue-50 hover:text-blue-700" aria-label={`Voice call ${peer.name}`} title="Voice call">
+          <Phone className="h-4 w-4" />
+        </button>
+        <button type="button" onClick={() => onStartCall(true)} className="rounded-full p-1.5 text-blue-600 transition-colors hover:bg-blue-50 hover:text-blue-700" aria-label={`Video call ${peer.name}`} title="Video call">
+          <Video className="h-4 w-4" />
+        </button>
         <button type="button" onClick={onMinimize} className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label={`Minimize chat with ${peer.name}`}>
           <Minus className="h-4 w-4" />
         </button>
@@ -213,6 +226,7 @@ export default function FloatingChatManager() {
   const { user } = useAuth();
   const [trayOpen, setTrayOpen] = useState(false);
   const [windows, setWindows] = useState<ChatWindowState[]>([]);
+  const [outgoingCall, setOutgoingCall] = useState<OutgoingCall | null>(null);
   const utils = trpc.useUtils();
   const { data: conversations = [] } = trpc.dm.conversations.useQuery(undefined, {
     enabled: !!user,
@@ -269,6 +283,15 @@ export default function FloatingChatManager() {
 
   return (
     <div className="hidden md:block">
+      {outgoingCall && (
+        <CallModal
+          peerId={outgoingCall.id}
+          peerName={outgoingCall.name}
+          peerAvatar={outgoingCall.avatar ?? null}
+          isVideo={outgoingCall.isVideo}
+          onClose={() => setOutgoingCall(null)}
+        />
+      )}
       {trayOpen && (
         <aside className="fixed bottom-16 right-4 z-[65] w-80 overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
@@ -320,6 +343,7 @@ export default function FloatingChatManager() {
           onMinimize={() => setWindows((current) => current.map((item) => item.conversationId === window.conversationId ? { ...item, minimized: true } : item))}
           onRestore={() => setWindows((current) => current.map((item) => item.conversationId === window.conversationId ? { ...item, minimized: false } : item))}
           onClose={() => setWindows((current) => current.filter((item) => item.conversationId !== window.conversationId))}
+          onStartCall={(isVideo) => setOutgoingCall({ ...window.peer, isVideo })}
         />
       ))}
 
