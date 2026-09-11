@@ -170,6 +170,7 @@ export default function NavBar() {
   const { user, logout } = useAuth();
   const [location, navigate] = useLocation();
   const { themeMode, setThemeMode } = useThemeMode();
+  const utils = trpc.useUtils();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -233,6 +234,22 @@ export default function NavBar() {
     refetchInterval: 30000,
   });
   const unreadMsgCount = (unreadMsgData as { count?: number } | undefined)?.count ?? 0;
+
+  // Refresh the top Messages badge immediately when the authenticated socket
+  // reports a direct-message change. The count itself still comes from the
+  // existing protected unread-count procedure.
+  useEffect(() => {
+    const refreshUnreadMessages = () => {
+      utils.dm.unreadCount.invalidate();
+      utils.dm.conversations.invalidate();
+    };
+    window.addEventListener("facingface:dm-refresh", refreshUnreadMessages);
+    window.addEventListener("focus", refreshUnreadMessages);
+    return () => {
+      window.removeEventListener("facingface:dm-refresh", refreshUnreadMessages);
+      window.removeEventListener("focus", refreshUnreadMessages);
+    };
+  }, [utils]);
 
   // Support unread count (admins only)
   const { data: supportUnreadData } = trpc.support.unreadCount.useQuery(undefined, {
@@ -813,7 +830,7 @@ export default function NavBar() {
               <MessageCircle size={24} strokeWidth={isActive("/messages") ? 2.4 : 1.8} />
               {unreadMsgCount > 0 && (
                 <span
-                  className="absolute top-1.5 right-1.5 min-w-[14px] h-3.5 rounded-full border-2 inline-flex items-center justify-center text-[9px] font-bold text-white px-0.5"
+                  className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] rounded-full border-2 inline-flex items-center justify-center text-[10px] font-black text-white px-1 shadow-sm"
                   style={{ backgroundColor: "var(--its-red)", borderColor: "var(--its-nav-bg)" }}
                 >
                   {unreadMsgCount > 9 ? "9+" : unreadMsgCount}
@@ -945,6 +962,7 @@ export default function NavBar() {
                     }
                   }}
                   className="relative flex flex-col items-center justify-center px-2 sm:px-3 xl:px-3.5 h-16 text-[9px] xl:text-[10px] font-bold tracking-widest uppercase transition-colors no-underline"
+                  aria-label={label === "Messages" && unreadMsgCount > 0 ? `Messages, ${unreadMsgCount > 9 ? "9 or more" : unreadMsgCount} unread` : label}
                   style={{
                     color: isSuperAdminItem ? "#b45309" : isActive ? "var(--its-text-primary)" : "var(--its-text-muted)",
                     borderBottom: isActive ? `2px solid ${isSuperAdminItem ? "#d97706" : "var(--its-text-primary)"}` : "2px solid transparent",
@@ -964,8 +982,8 @@ export default function NavBar() {
                     )}
                     {label === "Messages" && unreadMsgCount > 0 && (
                       <span
-                        className="absolute -top-1.5 -right-1.5 min-w-[14px] h-3.5 rounded-full inline-flex items-center justify-center text-[9px] font-bold text-white px-0.5"
-                        style={{ backgroundColor: "var(--its-red)" }}
+                        className="absolute -top-2 -right-2 min-w-[18px] h-[18px] rounded-full border-2 inline-flex items-center justify-center text-[10px] font-black text-white px-1 shadow-sm"
+                        style={{ backgroundColor: "var(--its-red)", borderColor: "var(--its-nav-bg)" }}
                       >
                         {unreadMsgCount > 9 ? "9+" : unreadMsgCount}
                       </span>
