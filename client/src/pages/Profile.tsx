@@ -3,7 +3,7 @@ import { trpc } from "@/lib/trpc";
 import { startRegistration, startAuthentication, browserSupportsWebAuthn } from "@simplewebauthn/browser";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useParams } from "wouter";
-import { Loader2, Edit2, Camera, X, Check, UserPlus, UserCheck, Clock, MessageCircle, Fingerprint, Plus, Star, Trash2, Images, BadgeCheck, Bookmark, Play, ShieldOff, Shield, Menu, Share2, Gift } from "lucide-react";
+import { Loader2, Edit2, Camera, X, Check, UserPlus, UserCheck, Clock, MessageCircle, Fingerprint, Plus, Star, Trash2, Images, BadgeCheck, Bookmark, Play, ShieldOff, Shield, Menu, Share2, Gift, Eye } from "lucide-react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import PostCard from "@/components/PostCard";
@@ -165,6 +165,19 @@ export default function Profile() {
     { userId: targetId! },
     { enabled: !!targetId }
   );
+  const recordProfileViewMutation = trpc.users.recordProfileView.useMutation();
+  const { data: profileViewerSummary } = trpc.users.profileViewerSummary.useQuery(undefined, {
+    enabled: !!isOwnProfile,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const recordedProfileViewRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!targetId || isOwnProfile || !profileData?.user || recordedProfileViewRef.current === targetId) return;
+    recordedProfileViewRef.current = targetId;
+    recordProfileViewMutation.mutate({ profileUserId: targetId });
+  }, [targetId, isOwnProfile, profileData?.user?.id]);
 
   const { data: postsData, isLoading: postsLoading, refetch: refetchPosts } = trpc.posts.getByUser.useQuery(
     { userId: targetId! },
@@ -1051,6 +1064,33 @@ export default function Profile() {
             </div>
           </div>
         </div>
+
+        {isOwnProfile && (
+          <section className="mb-4 rounded-2xl border border-sky-100 bg-sky-50/70 px-4 py-3 shadow-sm" aria-label="Profile Viewers">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-sky-700 shadow-sm"><Eye className="h-4 w-4" /></span>
+                <div>
+                  <p className="text-sm font-black text-slate-800">Profile viewers</p>
+                  <p className="text-xs text-slate-500">Last 30 days · only you can see this</p>
+                </div>
+              </div>
+              <span className="text-lg font-black text-sky-700">{profileViewerSummary?.totalCount ?? 0}</span>
+            </div>
+            {(profileViewerSummary?.recentViewers?.length ?? 0) > 0 ? (
+              <div className="mt-3 flex items-center gap-2 border-t border-sky-100 pt-3">
+                <div className="flex -space-x-2">
+                  {profileViewerSummary!.recentViewers.slice(0, 5).map((viewer) => (
+                    <a key={viewer.id} href={`/profile/${viewer.id}`} title={viewer.name ?? "Profile viewer"} className="block h-8 w-8 overflow-hidden rounded-full border-2 border-sky-50 bg-sky-200">
+                      {viewer.avatar ? <img src={viewer.avatar} alt="" className="h-full w-full object-cover" /> : <span className="flex h-full w-full items-center justify-center text-[10px] font-black text-sky-800">{(viewer.name ?? "?").charAt(0).toUpperCase()}</span>}
+                    </a>
+                  ))}
+                </div>
+                <p className="min-w-0 truncate text-xs text-slate-600">{profileViewerSummary!.recentViewers.map((viewer) => viewer.name ?? "A member").join(", ")}</p>
+              </div>
+            ) : <p className="mt-2 text-xs text-slate-500">Views from other signed-in members will appear here.</p>}
+          </section>
+        )}
 
         {/* Bio card — shown when user has bio, role, location, or website */}
         {!editing && (user.bio || user.currentRole || user.hometown || user.currentLocation || birthDayMonth || user.hobby || user.website || user.youtubeChannel) && (

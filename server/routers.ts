@@ -38,6 +38,8 @@ import {
   getUnreadNotificationCount,
   getUserById,
   getUserLikedIds,
+  recordProfileView,
+  getProfileViewerSummary,
   markNotificationsRead,
   removeFollow,
   removeLike,
@@ -1321,6 +1323,20 @@ const usersRouter = router({
 
       return { user, followerCount, followingCount, postCount };
     }),
+
+  recordProfileView: protectedProcedure
+    .input(z.object({ profileUserId: z.number().int().positive() }))
+    .mutation(async ({ input, ctx }) => {
+      if (input.profileUserId === ctx.user.id) return { recorded: false };
+      const profile = await getUserById(input.profileUserId);
+      if (!profile) throw new TRPCError({ code: "NOT_FOUND", message: "Profile not found." });
+      await recordProfileView(input.profileUserId, ctx.user.id);
+      return { recorded: true };
+    }),
+
+  profileViewerSummary: protectedProcedure.query(async ({ ctx }) => {
+    return getProfileViewerSummary(ctx.user.id);
+  }),
 
   updateProfile: protectedProcedure
     .input(

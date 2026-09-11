@@ -1166,3 +1166,18 @@ export const websiteNotices = pgTable("website_notices", {
 });
 export type WebsiteNotice = typeof websiteNotices.$inferSelect;
 export type InsertWebsiteNotice = typeof websiteNotices.$inferInsert;
+
+// Owner-only profile visitor summary. Each viewer has one rolling record per
+// profile; the application refreshes it no more than once per day and shows only
+// the profile owner a short recent list.
+export const profileViews = pgTable("profile_views", {
+  id: serial("id").primaryKey(),
+  profileUserId: integer("profileUserId").notNull(),
+  viewerUserId: integer("viewerUserId").notNull(),
+  viewCount: integer("viewCount").default(1).notNull(),
+  firstViewedAt: timestamp("firstViewedAt").defaultNow().notNull(),
+  lastViewedAt: timestamp("lastViewedAt").defaultNow().notNull(),
+});
+
+export type ProfileView = typeof profileViews.$inferSelect;
+export type InsertProfileView = typeof profileViews.$inferInsert;

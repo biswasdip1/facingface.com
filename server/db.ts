@@ -66,6 +66,7 @@ import {
   ProfilePhoto,
   coverPhotos,
   CoverPhoto,
+  profileViews,
   subscriptions,
   Subscription,
   InsertSubscription,
@@ -657,6 +658,26 @@ export async function ensureLegacyRuntimeSchema(): Promise<void> {
       if (!followerIndexes.has("page_follower_request_idx")) {
         await db.execute(sql`CREATE INDEX "page_follower_request_idx" ON "page_followers" ("pageId", "status")`);
       }
+    }
+
+    if (!(await relationExists("profile_views"))) {
+      await db.execute(sql`
+        CREATE TABLE "profile_views" (
+          "id" serial PRIMARY KEY NOT NULL,
+          "profileUserId" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+          "viewerUserId" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+          "viewCount" integer NOT NULL DEFAULT 1,
+          "firstViewedAt" timestamp DEFAULT now() NOT NULL,
+          "lastViewedAt" timestamp DEFAULT now() NOT NULL
+        )
+      `);
+    }
+    const profileViewIndexes = await existingIndexNames("profile_views");
+    if (!profileViewIndexes.has("profile_views_profile_viewer_unique")) {
+      await db.execute(sql`CREATE UNIQUE INDEX "profile_views_profile_viewer_unique" ON "profile_views" ("profileUserId", "viewerUserId")`);
+    }
+    if (!profileViewIndexes.has("profile_views_profile_recent_idx")) {
+      await db.execute(sql`CREATE INDEX "profile_views_profile_recent_idx" ON "profile_views" ("profileUserId", "lastViewedAt" DESC)`);
     }
 
     if (!(await relationExists("profile_photos"))) {
@@ -6130,4 +6151,68 @@ export async function getMediaRecordSummary(): Promise<{ mediaPosts: number; doc
     documents: Number(row?.documents ?? 0),
     recordedDocumentBytes: Number(row?.recordedDocumentBytes ?? 0),
   };
+}
+
+// ─── Profile Viewers ──────────────────────────────────────────────────────────
+
+/**
+ * Records a profile visit at most once per viewer/profile pair in a 24-hour
+ * period. Old records are pruned so the feature remains a small recent summary,
+ * not a permanent visitor archive.
+ */
+export async function recordProfileView(profileUserId: number, viewerUserId: number): Promise<void> {
+  if (!Number.isInteger(profileUserId) || !Number.isInteger(viewerUserId) || profileUserId <= 0 || viewerUserId <= 0 || profileUserId === viewerUserId) return;
+  const db = await getDb();
+  if (!db) return;
+
+  const now = new Date();
+  const retentionCutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const dailyCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  await db.delete(profileViews).where(lt(profileViews.lastViewedAt, retentionCutoff));
+
+  const [existing] = await db.select().from(profileViews).where(and(
+    eq(profileViews.profileUserId, profileUserId),
+    eq(profileViews.viewerUserId, viewerUserId),
+  )).limit(1);
+
+  if (existing) {
+    if (existing.lastViewedAt < dailyCutoff) {
+      await db.update(profileViews)
+        .set({ lastViewedAt: now, viewCount: sql`${profileViews.viewCount} + 1` })
+        .where(eq(profileViews.id, existing.id));
+    }
+    return;
+  }
+
+  await db.insert(profileViews).values({
+    profileUserId,
+    viewerUserId,
+    viewCount: 1,
+    firstViewedAt: now,
+    lastViewedAt: now,
+  }).onConflictDoNothing();
+}
+
+/** Returns a private recent-viewer summary for the profile owner only. */
+export async function getProfileViewerSummary(profileUserId: number) {
+  const db = await getDb();
+  if (!db) return { totalCount: 0, recentViewers: [] as Array<{ id: number; name: string | null; avatar: string | null; lastViewedAt: Date }> };
+
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const recent = await db.select({
+    id: users.id,
+    name: users.name,
+    avatar: users.avatar,
+    lastViewedAt: profileViews.lastViewedAt,
+  }).from(profileViews)
+    .innerJoin(users, eq(profileViews.viewerUserId, users.id))
+    .where(and(eq(profileViews.profileUserId, profileUserId), gte(profileViews.lastViewedAt, cutoff)))
+    .orderBy(desc(profileViews.lastViewedAt))
+    .limit(5);
+
+  const [countRow] = await db.select({ count: sql<number>`count(*)::int` })
+    .from(profileViews)
+    .where(and(eq(profileViews.profileUserId, profileUserId), gte(profileViews.lastViewedAt, cutoff)));
+
+  return { totalCount: Number(countRow?.count ?? 0), recentViewers: recent };
 }

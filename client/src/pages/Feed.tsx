@@ -264,6 +264,7 @@ export default function Feed() {
 
   const [watchingStreamId, setWatchingStreamId] = useState<number | null>(null);
   const [leftMoreOpen, setLeftMoreOpen] = useState(false);
+  const { data: profileViewerSummary } = trpc.users.profileViewerSummary.useQuery(undefined, { staleTime: 60_000, refetchOnWindowFocus: false });
   const { data: homeEventsData } = trpc.events.getMy.useQuery(undefined, { staleTime: 60_000, refetchOnWindowFocus: false });
   const { data: homeBirthdaysData } = trpc.events.birthdays.useQuery(undefined, { staleTime: 60_000, refetchOnWindowFocus: false });
   const homeEvents = (homeEventsData?.events ?? []).slice(0, 5);
@@ -336,6 +337,10 @@ export default function Feed() {
       )}
       <div className="mx-auto grid max-w-[1440px] grid-cols-1 gap-5 lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[250px_minmax(0,700px)_320px] 2xl:grid-cols-[260px_minmax(0,720px)_340px] xl:gap-6">
         <aside className="hidden lg:block sticky top-24 h-fit rounded-lg border border-slate-200 bg-sky-50/70 p-3 text-sm shadow-sm">
+          <Link href="/profile" className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-sky-100 bg-white/90 px-2.5 py-3 text-slate-700 shadow-sm transition-colors hover:border-sky-300 hover:text-[var(--its-red)]">
+            <span className="flex min-w-0 items-center gap-2"><Eye size={17} className="shrink-0 text-sky-600" /><span className="min-w-0"><span className="block font-bold">Profile viewers</span><span className="block text-[11px] font-medium text-slate-500">Last 30 days</span></span></span>
+            <span className="text-lg font-black text-sky-700">{profileViewerSummary?.totalCount ?? 0}</span>
+          </Link>
           <Link href="/subscription" className="flex items-center gap-2 border-b border-sky-100 px-2 py-3 font-semibold text-slate-700 hover:text-[var(--its-red)]">
             <BadgeCheck size={17} className="shrink-0 text-emerald-600" /> Get Verified
           </Link>
