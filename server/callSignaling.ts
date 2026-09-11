@@ -63,6 +63,17 @@ export function emitFriendPostFlash(recipientIds: number[], payload: FriendPostF
 }
 
 /**
+ * Notify authenticated participants that a direct-message conversation changed.
+ * This deliberately includes only the conversation ID—clients still retrieve the
+ * encrypted message through the existing participant-authorized tRPC procedure.
+ */
+export function emitDirectMessageRefresh(participantIds: number[], conversationId: number) {
+  if (!Number.isInteger(conversationId) || conversationId <= 0) return;
+  const recipients = new Set(participantIds.filter((id) => Number.isInteger(id) && id > 0));
+  for (const recipientId of recipients) emitToUser(recipientId, "dm:refresh", { conversationId });
+}
+
+/**
  * Attach authenticated call, direct-message and presence handlers to an
  * existing Socket.IO server instance. The session cookie—not a client-supplied
  * query parameter—determines which user receives targeted events.

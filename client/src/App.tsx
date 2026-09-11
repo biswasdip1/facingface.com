@@ -58,6 +58,7 @@ import EventsPage from "./pages/Events";
 import Reels, { ReelShareCard } from "./pages/Reels";
 import CallModal from "./components/CallModal";
 import WebsiteNoticePopup from "./components/WebsiteNoticePopup";
+import FloatingChatManager from "./components/FloatingChatManager";
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading } = useAuth();
@@ -207,6 +208,12 @@ function AppLayout() {
           ), { duration: 8000 });
         });
 
+        socket.on("dm:refresh", (payload: { conversationId?: number }) => {
+          if (Number.isInteger(payload?.conversationId) && (payload.conversationId ?? 0) > 0) {
+            window.dispatchEvent(new CustomEvent("facingface:dm-refresh", { detail: { conversationId: payload.conversationId } }));
+          }
+        });
+
         socket.on(
           "call:offer",
           ({
@@ -257,6 +264,7 @@ function AppLayout() {
         />
       )}
       <WebsiteNoticePopup scope="member" userId={user?.id} />
+      <FloatingChatManager />
       <NetworkStatusBanner />
       <NavBar />
       <MobileBottomNav />

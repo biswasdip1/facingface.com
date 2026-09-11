@@ -99,7 +99,19 @@ export default function Profile() {
     onError: (e) => toast.error(e.message),
   });
   const getOrCreateConv = trpc.dm.getOrCreate.useMutation({
-    onSuccess: () => navigate("/messages"),
+    onSuccess: (conversation) => {
+      const peer = profileData?.user;
+      window.dispatchEvent(new CustomEvent("facingface:open-dm", {
+        detail: {
+          conversationId: conversation.id,
+          peer: peer ? {
+            id: peer.id,
+            name: peer.name ?? "Conversation",
+            avatar: peer.avatar ?? null,
+          } : undefined,
+        },
+      }));
+    },
     onError: (e) => toast.error(e.message),
   });
   // Inline bio editing state

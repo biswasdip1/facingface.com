@@ -382,7 +382,7 @@ import {
   getWebsiteNotice,
   saveWebsiteNotice,
 } from "./db";
-import { emitFriendPostFlash, getFriendPostAlertRecipients } from "./callSignaling";
+import { emitDirectMessageRefresh, emitFriendPostFlash, getFriendPostAlertRecipients } from "./callSignaling";
 import { isManagedWebsiteNoticeImageUrl, isSupportedWebsiteNoticeVideoUrl } from "./websiteNoticeAccess";
 
 
@@ -2047,6 +2047,7 @@ const dmRouter = router({
       const recipientId = conv.participant1Id === ctx.user!.id ? conv.participant2Id : conv.participant1Id;
       const preview = input.text ?? (input.fileName ? `📎 ${input.fileName}` : "Sent a file");
       sendDmPushNotification(recipientId, ctx.user!.name ?? "Someone", preview).catch(() => {});
+      emitDirectMessageRefresh([ctx.user!.id, recipientId], input.conversationId);
       return msg;
     }),
   uploadFile: protectedProcedure
