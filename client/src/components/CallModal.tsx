@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { trpc } from "@/lib/trpc";
 
 const ICE_SERVERS = [
   { urls: "stun:stun.l.google.com:19302" },
@@ -77,6 +78,10 @@ export default function CallModal({
   socketRef: externalSocketRef,
 }: CallModalProps) {
   const { user } = useAuth();
+  const { data: relayConfig, isLoading: relayConfigLoading } = trpc.calls.iceServers.useQuery(undefined, {
+    staleTime: 45 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
   const [phase, setPhase] = useState<CallPhase>(incomingOffer ? "incoming" : "calling");
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
@@ -95,6 +100,7 @@ export default function CallModal({
   const cameraVideoTrackRef = useRef<MediaStreamTrack | null>(null);
   const internalSocketRef = useRef<any>(null);
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const connectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ringtoneContextRef = useRef<AudioContext | null>(null);
   const ringtoneIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isMountedRef = useRef(true);
@@ -225,6 +231,7 @@ export default function CallModal({
       try {
         await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
         await flushPendingIceCandidates(pcRef.current);
+        if (isMountedRef.current) setPhase("connecting");
       } catch {
         toast.error("The call answer could not be connected.");
       }
@@ -284,12 +291,12 @@ export default function CallModal({
     if (incomingOffer) return; // incoming — wait for user to accept
     const checkSocket = setInterval(() => {
       const socket = getSocket();
-      if (!socket || !user) return;
+      if (!socket || !user || relayConfigLoading) return;
       clearInterval(checkSocket);
       startOutgoingCall();
     }, 300);
     return () => clearInterval(checkSocket);
-  }, [incomingOffer, user]);
+  }, [incomingOffer, user, relayConfigLoading]);
 
   // Ring while a call is outgoing or awaiting a response. The browser may
   // silence an unsolicited incoming sound, but calls started by the member
@@ -305,6 +312,28 @@ export default function CallModal({
   useEffect(() => {
     if (phase === "connected") attachRemoteMedia();
   }, [phase, isVideo, attachRemoteMedia]);
+
+  // Do not leave a person on a silent Connecting screen forever when their
+  // current network blocks direct WebRTC and no TURN relay is configured.
+  useEffect(() => {
+    if (phase !== "connecting") {
+      if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+      return;
+    }
+    connectionTimeoutRef.current = setTimeout(() => {
+      if (!isMountedRef.current || pcRef.current?.connectionState === "connected") return;
+      toast.error(relayConfig?.relayConfigured
+        ? "The call could not establish media. Please try again."
+        : "The call could not connect on this network. A TURN relay is required for reliable calls.");
+      cleanup();
+      onClose();
+    }, 25_000);
+    return () => {
+      if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+    };
+  }, [phase, relayConfig?.relayConfigured, onClose]);
 
   // Duration timer when connected
   useEffect(() => {
@@ -332,7 +361,8 @@ export default function CallModal({
   }, []);
 
   function createPeerConnection() {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const iceServers = relayConfig?.iceServers?.length ? relayConfig.iceServers : ICE_SERVERS;
+    const pc = new RTCPeerConnection({ iceServers });
     pcRef.current = pc;
 
     pc.onicecandidate = (e) => {
@@ -407,6 +437,10 @@ export default function CallModal({
   }
 
   async function acceptIncomingCall() {
+    if (relayConfigLoading) {
+      toast.info("Preparing secure call connection. Please tap Accept again in a moment.");
+      return;
+    }
     if (!incomingOffer) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -457,6 +491,8 @@ export default function CallModal({
     setIsScreenSharing(false);
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
+    if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
+    connectionTimeoutRef.current = null;
     pendingIceCandidatesRef.current = [];
     queuedIncomingCandidateKeysRef.current.clear();
     remoteStreamRef.current = null;
@@ -573,7 +609,9 @@ export default function CallModal({
               </button>
               <button
                 onClick={acceptIncomingCall}
-                className="flex flex-col items-center gap-2 group"
+                disabled={relayConfigLoading}
+                className="flex flex-col items-center gap-2 group disabled:opacity-60"
+                title={relayConfigLoading ? "Preparing secure call connection" : "Accept call"}
               >
                 <div className="w-16 h-16 rounded-full bg-green-600 flex items-center justify-center group-hover:bg-green-700 transition-colors">
                   <Phone className="w-7 h-7" />

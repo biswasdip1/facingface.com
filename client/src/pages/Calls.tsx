@@ -55,6 +55,10 @@ const ICE_SERVERS = [
 
 export default function Calls() {
   const { user } = useAuth();
+  const { data: relayConfig, isLoading: relayConfigLoading } = trpc.calls.iceServers.useQuery(undefined, {
+    staleTime: 45 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
   const [activeTab, setActiveTab] = useState<"friends" | "history">("friends");
   const [callState, setCallState] = useState<CallState>({ type: "idle" });
   const [micOn, setMicOn] = useState(true);
@@ -182,6 +186,9 @@ export default function Calls() {
         try {
           await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
           await flushPendingIceCandidates(pcRef.current);
+          setCallState((current) => current.type === "calling"
+            ? { type: "connected", peerId: current.peerId, peerName: current.peerName, isVideo: current.isVideo }
+            : current);
         } catch {
           toast.error("The call answer could not be connected.");
         }
@@ -207,7 +214,8 @@ export default function Calls() {
   }, [user]);
 
   function createPeerConnection(peerId: number) {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const iceServers = relayConfig?.iceServers?.length ? relayConfig.iceServers : ICE_SERVERS;
+    const pc = new RTCPeerConnection({ iceServers });
     pcRef.current = pc;
 
     pc.onicecandidate = (e) => {
@@ -233,6 +241,10 @@ export default function Calls() {
   }
 
   async function startCall(peerId: number, peerName: string, isVideo: boolean) {
+    if (relayConfigLoading) {
+      toast.info("Preparing secure call connection. Please try again in a moment.");
+      return;
+    }
     if (!socketRef.current) {
       toast.error("Real-time connection not available. Please refresh the page.");
       return;
@@ -263,6 +275,10 @@ export default function Calls() {
   }
 
   async function acceptCall() {
+    if (relayConfigLoading) {
+      toast.info("Preparing secure call connection. Please tap Answer again in a moment.");
+      return;
+    }
     if (callState.type !== "incoming") return;
     const { peerId, peerName, isVideo, offer } = callState;
     try {
@@ -437,7 +453,7 @@ export default function Calls() {
                   <FriendCallRow
                     key={f.id}
                     userId={otherId}
-                    disabled={callState.type !== "idle"}
+                    disabled={callState.type !== "idle" || relayConfigLoading}
                     onAudioCall={(name) => startCall(otherId, name, false)}
                     onVideoCall={(name) => startCall(otherId, name, true)}
                   />
@@ -508,7 +524,7 @@ export default function Calls() {
                           variant="outline"
                           size="icon"
                           className="w-8 h-8 rounded-full"
-                          disabled={callState.type !== "idle"}
+                          disabled={callState.type !== "idle" || relayConfigLoading}
                           title="Call back (voice)"
                           onClick={() => startCall(peerId, peerName, false)}
                         >
@@ -518,7 +534,7 @@ export default function Calls() {
                           variant="outline"
                           size="icon"
                           className="w-8 h-8 rounded-full"
-                          disabled={callState.type !== "idle"}
+                          disabled={callState.type !== "idle" || relayConfigLoading}
                           title="Call back (video)"
                           onClick={() => startCall(peerId, peerName, true)}
                         >

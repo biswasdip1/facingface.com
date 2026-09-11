@@ -385,6 +385,7 @@ import {
   saveWebsiteNotice,
 } from "./db";
 import { emitDirectMessageRefresh, emitFriendPostFlash, getFriendPostAlertRecipients } from "./callSignaling";
+import { getWebRtcRelayConfig } from "./webrtcRelay";
 import { isManagedWebsiteNoticeImageUrl, isSupportedWebsiteNoticeVideoUrl } from "./websiteNoticeAccess";
 
 
@@ -2854,6 +2855,12 @@ const blocksRouter = router({
 // ─── Calls Router ──────────────────────────────────────────────────────────────
 
 const callsRouter = router({
+  /**
+   * Returns browser-safe STUN/TURN entries. Provider API credentials remain
+   * server-only; an authenticated caller receives only ICE credentials.
+   */
+  iceServers: protectedProcedure.query(async () => getWebRtcRelayConfig()),
+
   createRoom: protectedProcedure
     .input(z.object({
       groupId: z.number().optional(),
