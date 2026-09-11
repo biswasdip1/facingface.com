@@ -88,7 +88,56 @@ export default function CallModal({
   const cameraVideoTrackRef = useRef<MediaStreamTrack | null>(null);
   const internalSocketRef = useRef<any>(null);
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const ringtoneContextRef = useRef<AudioContext | null>(null);
+  const ringtoneIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isMountedRef = useRef(true);
+
+  const stopRingtone = useCallback(() => {
+    if (ringtoneIntervalRef.current) {
+      clearInterval(ringtoneIntervalRef.current);
+      ringtoneIntervalRef.current = null;
+    }
+    const context = ringtoneContextRef.current;
+    ringtoneContextRef.current = null;
+    if (context && context.state !== "closed") {
+      context.close().catch(() => {});
+    }
+  }, []);
+
+  const startRingtone = useCallback(() => {
+    if (ringtoneIntervalRef.current || typeof window === "undefined") return;
+
+    try {
+      const AudioContextConstructor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextConstructor) return;
+
+      const context = new AudioContextConstructor();
+      ringtoneContextRef.current = context;
+      context.resume().catch(() => {});
+
+      const playRing = () => {
+        const now = context.currentTime;
+        [0, 0.24].forEach((offset) => {
+          const oscillator = context.createOscillator();
+          const gain = context.createGain();
+          oscillator.type = "sine";
+          oscillator.frequency.setValueAtTime(880, now + offset);
+          gain.gain.setValueAtTime(0.0001, now + offset);
+          gain.gain.exponentialRampToValueAtTime(0.075, now + offset + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.18);
+          oscillator.connect(gain).connect(context.destination);
+          oscillator.start(now + offset);
+          oscillator.stop(now + offset + 0.2);
+        });
+      };
+
+      playRing();
+      ringtoneIntervalRef.current = setInterval(playRing, 1800);
+    } catch {
+      // Browsers may prevent sound before a user interaction. The visible call
+      // status remains available and audio is retried on later call actions.
+    }
+  }, []);
 
   // Use external socket if provided, otherwise create our own
   const getSocket = useCallback(() => {
@@ -160,6 +209,15 @@ export default function CallModal({
     }, 300);
     return () => clearInterval(checkSocket);
   }, [incomingOffer, user]);
+
+  // Ring while a call is outgoing or awaiting a response. The browser may
+  // silence an unsolicited incoming sound, but calls started by the member
+  // immediately play this audible, repeating tone where permitted.
+  useEffect(() => {
+    if (phase === "calling" || phase === "incoming") startRingtone();
+    else stopRingtone();
+    return () => stopRingtone();
+  }, [phase, startRingtone, stopRingtone]);
 
   // Duration timer when connected
   useEffect(() => {
@@ -289,6 +347,7 @@ export default function CallModal({
   }
 
   function cleanup() {
+    stopRingtone();
     pcRef.current?.close();
     pcRef.current = null;
     screenStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -386,8 +445,8 @@ export default function CallModal({
         {/* ── Incoming call screen ── */}
         {phase === "incoming" && (
           <div className="flex flex-col items-center gap-6 p-10">
-            <p className="text-sm text-gray-400 uppercase tracking-widest">
-              Incoming {isVideo ? "Video" : "Voice"} Call
+            <p className="text-sm text-gray-400 uppercase tracking-widest" aria-live="assertive">
+              Incoming {isVideo ? "Video" : "Voice"} Call · Ringing
             </p>
             <Avatar className="w-24 h-24 ring-4 ring-green-500/50">
               <AvatarImage src={peerAvatar ?? undefined} />
@@ -435,7 +494,7 @@ export default function CallModal({
               <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-green-500 border-2 border-gray-900 animate-pulse" />
             </div>
             <p className="text-2xl font-bold">{peerName}</p>
-            <p className="text-gray-400 animate-pulse">Calling…</p>
+            <p className="text-gray-300 animate-pulse" aria-live="polite">Ringing… Waiting for {peerName} to answer</p>
             <button
               onClick={hangUp}
               className="mt-4 w-16 h-16 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-700 transition-colors"

@@ -948,8 +948,10 @@ export default function Messages() {
         {/* DM thread panel */}
         <div
           className={cn(
-            "flex-1 flex flex-col min-w-0",
-            (!activeConvId || sidebarTab === "groups") ? "hidden md:flex" : "flex",
+            "flex min-w-0 flex-col overflow-hidden",
+            (!activeConvId || sidebarTab === "groups")
+              ? "hidden md:flex md:flex-1"
+              : "fixed inset-x-0 bottom-0 top-16 z-40 h-[calc(100dvh-4rem)] bg-background md:static md:z-auto md:h-auto md:flex-1",
             sidebarTab === "groups" ? "hidden" : ""
           )}
           style={{ background: "var(--its-bg)" }}
