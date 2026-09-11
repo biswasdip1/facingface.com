@@ -97,6 +97,7 @@ function AppLayout() {
     peerAvatar?: string | null;
     isVideo: boolean;
     offer: RTCSessionDescriptionInit;
+    incomingCandidates: RTCIceCandidateInit[];
   } | null>(null);
   const globalSocketRef = useRef<any>(null);
   const pushSubscribeMutation = trpc.push.subscribe.useMutation();
@@ -238,9 +239,17 @@ function AppLayout() {
               peerAvatar: fromAvatar ?? null,
               isVideo,
               offer,
+              incomingCandidates: [],
             });
           }
         );
+        socket.on("call:ice", ({ from, candidate }: { from?: number; candidate?: RTCIceCandidateInit }) => {
+          if (!candidate || window.location.pathname.startsWith("/messages")) return;
+          setGlobalIncomingCall((current) => {
+            if (!current || current.peerId !== from) return current;
+            return { ...current, incomingCandidates: [...current.incomingCandidates, candidate] };
+          });
+        });
       })
       .catch(() => {});
 
@@ -260,6 +269,7 @@ function AppLayout() {
           peerAvatar={globalIncomingCall.peerAvatar}
           isVideo={globalIncomingCall.isVideo}
           incomingOffer={globalIncomingCall.offer}
+          incomingCandidates={globalIncomingCall.incomingCandidates}
           socketRef={globalSocketRef}
           onClose={() => setGlobalIncomingCall(null)}
         />

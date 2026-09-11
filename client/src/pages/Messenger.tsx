@@ -60,6 +60,7 @@ type IncomingCallInfo = {
   peerAvatar?: string | null;
   isVideo: boolean;
   offer: RTCSessionDescriptionInit;
+  incomingCandidates: RTCIceCandidateInit[];
 };
 
 function getInitials(name?: string | null) {
@@ -320,7 +321,14 @@ export default function Messenger() {
       socketRef.current = socket;
       socket.on("call:offer", ({ from, fromName, fromAvatar, offer, isVideo }: any) => {
         if (notificationSounds && !doNotDisturb) playMessengerNotificationSound();
-        setIncomingCall({ peerId: from, peerName: fromName, peerAvatar: fromAvatar ?? null, isVideo, offer });
+        setIncomingCall({ peerId: from, peerName: fromName, peerAvatar: fromAvatar ?? null, isVideo, offer, incomingCandidates: [] });
+      });
+      socket.on("call:ice", ({ from, candidate }: { from?: number; candidate?: RTCIceCandidateInit }) => {
+        if (!candidate) return;
+        setIncomingCall((current) => {
+          if (!current || current.peerId !== from) return current;
+          return { ...current, incomingCandidates: [...current.incomingCandidates, candidate] };
+        });
       });
       socket.on("dm:typing", ({ conversationId }: { from: number; conversationId: number }) => {
         if (activeRef.current?.kind === "dm" && activeRef.current.id === conversationId) setPeerIsTyping(true);
@@ -681,6 +689,7 @@ export default function Messenger() {
           peerAvatar={incomingCall.peerAvatar}
           isVideo={incomingCall.isVideo}
           incomingOffer={incomingCall.offer}
+          incomingCandidates={incomingCall.incomingCandidates}
           socketRef={socketRef}
           onClose={() => setIncomingCall(null)}
         />

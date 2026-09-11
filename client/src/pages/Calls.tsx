@@ -65,6 +65,9 @@ export default function Calls() {
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
+  const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const socketRef = useRef<any>(null);
@@ -139,6 +142,26 @@ export default function Calls() {
     return () => { hangUp(); };
   }, []);
 
+  const attachRemoteMedia = useCallback(() => {
+    const stream = remoteStreamRef.current;
+    if (!stream) return;
+    if (remoteAudioRef.current && remoteAudioRef.current.srcObject !== stream) {
+      remoteAudioRef.current.srcObject = stream;
+      remoteAudioRef.current.play().catch(() => {});
+    }
+    if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== stream) {
+      remoteVideoRef.current.srcObject = stream;
+      remoteVideoRef.current.play().catch(() => {});
+    }
+  }, []);
+
+  const flushPendingIceCandidates = useCallback(async (pc: RTCPeerConnection) => {
+    if (!pc.remoteDescription) return;
+    for (const candidate of pendingIceCandidatesRef.current.splice(0)) {
+      try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
+    }
+  }, []);
+
   // Socket.IO signalling
   useEffect(() => {
     if (!user) return;
@@ -155,15 +178,23 @@ export default function Calls() {
       });
 
       socket.on("call:answer", async ({ answer }: any) => {
-        if (pcRef.current) {
+        if (!pcRef.current) return;
+        try {
           await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+          await flushPendingIceCandidates(pcRef.current);
+        } catch {
+          toast.error("The call answer could not be connected.");
         }
       });
 
-      socket.on("call:ice", async ({ candidate }: any) => {
-        if (pcRef.current && candidate) {
-          await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+      socket.on("call:ice", async ({ candidate }: { candidate?: RTCIceCandidateInit }) => {
+        if (!candidate) return;
+        const pc = pcRef.current;
+        if (!pc || !pc.remoteDescription) {
+          pendingIceCandidatesRef.current.push(candidate);
+          return;
         }
+        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
       });
 
       socket.on("call:hangup", () => {
@@ -186,9 +217,10 @@ export default function Calls() {
     };
 
     pc.ontrack = (e) => {
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = e.streams[0];
-      }
+      const stream = e.streams[0] ?? remoteStreamRef.current ?? new MediaStream();
+      if (!e.streams[0] && !stream.getTracks().some((track) => track.id === e.track.id)) stream.addTrack(e.track);
+      remoteStreamRef.current = stream;
+      attachRemoteMedia();
     };
 
     pc.onconnectionstatechange = () => {
@@ -242,6 +274,7 @@ export default function Calls() {
       stream.getTracks().forEach((t) => pc.addTrack(t, stream));
 
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      await flushPendingIceCandidates(pc);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
@@ -266,8 +299,11 @@ export default function Calls() {
     pcRef.current = null;
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
+    pendingIceCandidatesRef.current = [];
+    remoteStreamRef.current = null;
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
     setCallState({ type: "idle" });
     setMicOn(true);
     setCamOn(true);
@@ -288,7 +324,9 @@ export default function Calls() {
   const historyRows = historyData?.rows ?? [];
 
   return (
-    <div className="max-w-4xl mx-auto py-8 px-4">
+    <>
+      <audio ref={remoteAudioRef} autoPlay playsInline className="sr-only" />
+      <div className="max-w-4xl mx-auto py-8 px-4">
       <div className="flex items-center gap-3 mb-6">
         <PhoneCall className="w-7 h-7 text-primary" />
         <h1 className="text-2xl font-bold">Calls</h1>
@@ -495,7 +533,8 @@ export default function Calls() {
           )}
         </>
       )}
-    </div>
+      </div>
+    </>
   );
 }
 

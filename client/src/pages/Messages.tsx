@@ -23,6 +23,7 @@ interface IncomingCallInfo {
   peerAvatar?: string | null;
   isVideo: boolean;
   offer: RTCSessionDescriptionInit;
+  incomingCandidates: RTCIceCandidateInit[];
 }
 
 const DM_FILE_MAX = 3 * 1024 * 1024; // 3 MB
@@ -167,9 +168,17 @@ export default function Messages() {
               peerAvatar: fromAvatar ?? null,
               isVideo,
               offer,
+              incomingCandidates: [],
             });
           }
         );
+        socket.on("call:ice", ({ from, candidate }: { from?: number; candidate?: RTCIceCandidateInit }) => {
+          if (!candidate) return;
+          setIncomingCall((current) => {
+            if (!current || current.peerId !== from) return current;
+            return { ...current, incomingCandidates: [...current.incomingCandidates, candidate] };
+          });
+        });
 
         // Typing indicator events
         socket.on("dm:typing", ({ from, conversationId }: { from: number; conversationId: number }) => {
@@ -679,6 +688,7 @@ export default function Messages() {
           peerAvatar={incomingCall.peerAvatar}
           isVideo={incomingCall.isVideo}
           incomingOffer={incomingCall.offer}
+          incomingCandidates={incomingCall.incomingCandidates}
           socketRef={socketRef}
           onClose={() => setIncomingCall(null)}
         />

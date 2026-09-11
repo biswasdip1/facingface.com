@@ -47,7 +47,7 @@ function getInitials(name: string) {
     .slice(0, 2);
 }
 
-type CallPhase = "calling" | "incoming" | "connected" | "ended";
+type CallPhase = "calling" | "incoming" | "connecting" | "connected" | "ended";
 
 interface CallModalProps {
   /** ID of the remote user */
@@ -58,6 +58,8 @@ interface CallModalProps {
   isVideo: boolean;
   /** If provided, this is an incoming call — we received the offer already */
   incomingOffer?: RTCSessionDescriptionInit;
+  /** ICE candidates received before the incoming call panel finished mounting. */
+  incomingCandidates?: RTCIceCandidateInit[];
   /** Called when the modal should be closed */
   onClose: () => void;
   /** Shared socket ref from the parent (optional — we create our own if not provided) */
@@ -70,6 +72,7 @@ export default function CallModal({
   peerAvatar,
   isVideo,
   incomingOffer,
+  incomingCandidates = [],
   onClose,
   socketRef: externalSocketRef,
 }: CallModalProps) {
@@ -82,6 +85,10 @@ export default function CallModal({
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
+  const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const queuedIncomingCandidateKeysRef = useRef(new Set<string>());
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
@@ -139,6 +146,50 @@ export default function CallModal({
     }
   }, []);
 
+  const attachRemoteMedia = useCallback(() => {
+    const stream = remoteStreamRef.current;
+    if (!stream) return;
+
+    // Always use a dedicated audio element for the remote microphone track.
+    // It prevents audio from depending on whether a video panel has rendered.
+    if (remoteAudioRef.current && remoteAudioRef.current.srcObject !== stream) {
+      remoteAudioRef.current.srcObject = stream;
+      remoteAudioRef.current.play().catch(() => {});
+    }
+
+    if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== stream) {
+      remoteVideoRef.current.srcObject = stream;
+      remoteVideoRef.current.play().catch(() => {});
+    }
+  }, []);
+
+  const flushPendingIceCandidates = useCallback(async (pc: RTCPeerConnection) => {
+    if (!pc.remoteDescription) return;
+    const candidates = pendingIceCandidatesRef.current.splice(0);
+    for (const candidate of candidates) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch {
+        // A duplicate or expired candidate is safe to ignore; later candidates
+        // can still establish the media route.
+      }
+    }
+  }, []);
+
+  // Candidate packets can arrive directly after an offer, before React has
+  // mounted this dialog. Keep the parent's buffered candidates exactly once.
+  useEffect(() => {
+    for (const candidate of incomingCandidates) {
+      if (!candidate) continue;
+      const key = JSON.stringify(candidate);
+      if (queuedIncomingCandidateKeysRef.current.has(key)) continue;
+      queuedIncomingCandidateKeysRef.current.add(key);
+      pendingIceCandidatesRef.current.push(candidate);
+    }
+    const pc = pcRef.current;
+    if (pc?.remoteDescription) flushPendingIceCandidates(pc);
+  }, [incomingCandidates, flushPendingIceCandidates]);
+
   // Use external socket if provided, otherwise create our own
   const getSocket = useCallback(() => {
     return externalSocketRef?.current ?? internalSocketRef.current;
@@ -161,42 +212,72 @@ export default function CallModal({
     };
   }, [user, externalSocketRef]);
 
-  // Set up socket event listeners
+  // Register signaling handlers as soon as the shared socket is available.
+  // The previous 200 ms polling gap could lose the first ICE candidates on a
+  // fast mobile network, leaving a timer running without a usable media path.
   useEffect(() => {
     if (!user) return;
-    const checkSocket = setInterval(() => {
-      const socket = getSocket();
-      if (!socket) return;
-      clearInterval(checkSocket);
+    let attachedSocket: any = null;
+    let checkSocket: ReturnType<typeof setInterval> | null = null;
 
-      socket.on("call:answer", async ({ answer }: { answer: RTCSessionDescriptionInit }) => {
-        if (!isMountedRef.current) return;
-        if (pcRef.current) {
-          try {
-            await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
-          } catch {}
-        }
-      });
+    const handleAnswer = async ({ answer }: { answer: RTCSessionDescriptionInit }) => {
+      if (!isMountedRef.current || !pcRef.current) return;
+      try {
+        await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+        await flushPendingIceCandidates(pcRef.current);
+      } catch {
+        toast.error("The call answer could not be connected.");
+      }
+    };
+    const handleIce = async ({ candidate }: { candidate: RTCIceCandidateInit }) => {
+      if (!isMountedRef.current || !candidate) return;
+      const pc = pcRef.current;
+      if (!pc || !pc.remoteDescription) {
+        pendingIceCandidatesRef.current.push(candidate);
+        return;
+      }
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch {
+        // Candidate delivery can overlap with offer/answer processing.
+        // Later candidates can still establish the media route.
+      }
+    };
+    const handleHangup = () => {
+      if (!isMountedRef.current) return;
+      toast.info(`${peerName} ended the call.`);
+      cleanup();
+      onClose();
+    };
+    const attach = (socket: any) => {
+      if (attachedSocket) return;
+      attachedSocket = socket;
+      socket.on("call:answer", handleAnswer);
+      socket.on("call:ice", handleIce);
+      socket.on("call:hangup", handleHangup);
+    };
 
-      socket.on("call:ice", async ({ candidate }: { candidate: RTCIceCandidateInit }) => {
-        if (!isMountedRef.current) return;
-        if (pcRef.current && candidate) {
-          try {
-            await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
-          } catch {}
-        }
-      });
+    const availableSocket = getSocket();
+    if (availableSocket) attach(availableSocket);
+    else {
+      checkSocket = setInterval(() => {
+        const socket = getSocket();
+        if (!socket) return;
+        if (checkSocket) clearInterval(checkSocket);
+        checkSocket = null;
+        attach(socket);
+      }, 25);
+    }
 
-      socket.on("call:hangup", () => {
-        if (!isMountedRef.current) return;
-        toast.info(`${peerName} ended the call.`);
-        cleanup();
-        onClose();
-      });
-    }, 200);
-
-    return () => clearInterval(checkSocket);
-  }, [user, peerName, onClose, getSocket]);
+    return () => {
+      if (checkSocket) clearInterval(checkSocket);
+      if (attachedSocket) {
+        attachedSocket.off("call:answer", handleAnswer);
+        attachedSocket.off("call:ice", handleIce);
+        attachedSocket.off("call:hangup", handleHangup);
+      }
+    };
+  }, [user, peerName, onClose, getSocket, flushPendingIceCandidates]);
 
   // Auto-start outgoing call
   useEffect(() => {
@@ -218,6 +299,12 @@ export default function CallModal({
     else stopRingtone();
     return () => stopRingtone();
   }, [phase, startRingtone, stopRingtone]);
+
+  // A remote track can arrive before the connected UI mounts. Reattach the
+  // retained stream when the visible call panel becomes available.
+  useEffect(() => {
+    if (phase === "connected") attachRemoteMedia();
+  }, [phase, isVideo, attachRemoteMedia]);
 
   // Duration timer when connected
   useEffect(() => {
@@ -255,22 +342,33 @@ export default function CallModal({
     };
 
     pc.ontrack = (e) => {
-      if (remoteVideoRef.current && e.streams[0]) {
-        remoteVideoRef.current.srcObject = e.streams[0];
+      const stream = e.streams[0] ?? remoteStreamRef.current ?? new MediaStream();
+      if (!e.streams[0] && !stream.getTracks().some((track) => track.id === e.track.id)) {
+        stream.addTrack(e.track);
       }
+      remoteStreamRef.current = stream;
+      attachRemoteMedia();
     };
 
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "connected") {
         if (isMountedRef.current) setPhase("connected");
-      } else if (
-        pc.connectionState === "disconnected" ||
-        pc.connectionState === "failed"
-      ) {
+      } else if (pc.connectionState === "failed") {
         if (isMountedRef.current) {
+          toast.error("The call could not connect. Please try again.");
           cleanup();
           onClose();
         }
+      } else if (pc.connectionState === "disconnected") {
+        // A brief connection change is normal on mobile networks. Only close
+        // after a short grace period if the call has not recovered.
+        window.setTimeout(() => {
+          if (pc.connectionState === "disconnected" && isMountedRef.current) {
+            toast.info("The call was disconnected.");
+            cleanup();
+            onClose();
+          }
+        }, 4000);
       }
     };
 
@@ -323,11 +421,14 @@ export default function CallModal({
       stream.getTracks().forEach((t) => pc.addTrack(t, stream));
 
       await pc.setRemoteDescription(new RTCSessionDescription(incomingOffer));
+      await flushPendingIceCandidates(pc);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
       getSocket()?.emit("call:answer", { to: peerId, answer });
-      if (isMountedRef.current) setPhase("connected");
+      // Wait for the actual WebRTC connection state before presenting this as
+      // a connected call. This keeps status truthful when media is still joining.
+      if (isMountedRef.current) setPhase("connecting");
     } catch (err: any) {
       toast.error("Could not accept call: " + (err.message ?? "Unknown error"));
       onClose();
@@ -356,8 +457,12 @@ export default function CallModal({
     setIsScreenSharing(false);
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
+    pendingIceCandidatesRef.current = [];
+    queuedIncomingCandidateKeysRef.current.clear();
+    remoteStreamRef.current = null;
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
   }
 
   function toggleMic() {
@@ -434,6 +539,7 @@ export default function CallModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+      <audio ref={remoteAudioRef} autoPlay playsInline className="sr-only" />
       <div
         className={cn(
           "relative bg-gray-900 text-white rounded-2xl shadow-2xl overflow-hidden flex flex-col",
@@ -478,8 +584,8 @@ export default function CallModal({
           </div>
         )}
 
-        {/* ── Calling (waiting for answer) ── */}
-        {phase === "calling" && (
+        {/* ── Calling / connecting ── */}
+        {(phase === "calling" || phase === "connecting") && (
           <div className="flex flex-col items-center gap-6 p-10">
             <p className="text-sm text-gray-400 uppercase tracking-widest">
               {isVideo ? "Video" : "Voice"} Call
@@ -494,7 +600,9 @@ export default function CallModal({
               <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-green-500 border-2 border-gray-900 animate-pulse" />
             </div>
             <p className="text-2xl font-bold">{peerName}</p>
-            <p className="text-gray-300 animate-pulse" aria-live="polite">Ringing… Waiting for {peerName} to answer</p>
+            <p className="text-gray-300 animate-pulse" aria-live="polite">
+              {phase === "calling" ? `Ringing… Waiting for ${peerName} to answer` : "Connecting audio and video…"}
+            </p>
             <button
               onClick={hangUp}
               className="mt-4 w-16 h-16 rounded-full bg-red-600 flex items-center justify-center hover:bg-red-700 transition-colors"
@@ -540,8 +648,7 @@ export default function CallModal({
                 </Avatar>
                 <p className="text-2xl font-bold">{peerName}</p>
                 <p className="text-green-400 font-mono">{formatDuration(callDuration)}</p>
-                {/* Hidden video elements for audio tracks */}
-                <video ref={remoteVideoRef} autoPlay playsInline className="hidden" />
+                {/* Remote sound is handled by the dedicated audio element above. */}
                 <video ref={localVideoRef} autoPlay playsInline muted className="hidden" />
               </div>
             )}

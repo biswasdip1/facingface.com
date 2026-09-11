@@ -116,7 +116,7 @@ export function initCallSignaling(io: SocketServer) {
     });
 
     socket.on("call:ice", (data: { to: number; candidate: RTCIceCandidateInit }) => {
-      forwardTo(data.to, "call:ice", { candidate: data.candidate });
+      forwardTo(data.to, "call:ice", { from: userId, candidate: data.candidate });
     });
 
     socket.on("call:hangup", (data: { to: number }) => {
