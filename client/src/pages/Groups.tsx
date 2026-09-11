@@ -91,12 +91,12 @@ export default function Groups() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6">
+    <div className="ff-wide-shell mx-auto px-4 py-7 xl:py-8">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Build your Public Group</h1>
-          <p className="text-muted-foreground text-sm mt-1">
+          <h1 className="text-3xl xl:text-4xl font-black tracking-tight text-foreground">Build your Public Group</h1>
+          <p className="text-muted-foreground text-base mt-1">
             Discover communities and connect with people who share your interests.
           </p>
         </div>
@@ -181,7 +181,7 @@ export default function Groups() {
       <div className="relative mb-4">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
         <Input
-          className="pl-9"
+          className="pl-9 text-base h-11"
           placeholder="Search groups by name, description, or category..."
           value={search}
           onChange={(e) => handleSearchChange(e.target.value)}
@@ -207,7 +207,7 @@ export default function Groups() {
 
       {/* Groups grid */}
       {isLoading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5">
           {Array.from({ length: 8 }).map((_, i) => (
             <div key={i} className="h-52 rounded-xl bg-muted animate-pulse" />
           ))}
@@ -218,12 +218,12 @@ export default function Groups() {
           <p className="text-muted-foreground">No groups found. Be the first to create one!</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5">
           {filteredGroups.map((group) => (
             <Link key={group.id} href={`/g/${group.handle}`}>
               <Card className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer h-full">
                 {/* Cover photo */}
-                <div className="h-28 bg-gradient-to-br from-primary/30 to-primary/10 relative overflow-hidden">
+                <div className="h-32 bg-gradient-to-br from-primary/30 to-primary/10 relative overflow-hidden">
                   {group.coverPhoto ? (
                     <img src={group.coverPhoto} alt={group.name} className="w-full h-full object-cover" />
                   ) : (
@@ -237,12 +237,12 @@ export default function Groups() {
                     </Badge>
                   )}
                 </div>
-                <CardContent className="p-3">
-                  <h3 className="font-semibold text-sm line-clamp-1">{group.name}</h3>
+                <CardContent className="p-4">
+                  <h3 className="font-bold text-lg line-clamp-1">{group.name}</h3>
                   {group.description && (
-                    <p className="text-xs text-muted-foreground line-clamp-2 mt-1">{group.description}</p>
+                    <p className="text-sm text-muted-foreground line-clamp-2 mt-1.5">{group.description}</p>
                   )}
-                  <div className="flex items-center gap-1 mt-2 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-1 mt-2.5 text-sm text-muted-foreground">
                     <Globe className="w-3 h-3" />
                     <span>Public Group</span>
                     <span className="mx-1">·</span>

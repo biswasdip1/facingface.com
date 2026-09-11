@@ -175,20 +175,20 @@ export default function Shop() {
             )}
           </div>
           <div className="p-3">
-            <p className="font-semibold text-sm line-clamp-2 leading-tight mb-1">{listing.title}</p>
-            <p className="text-primary font-bold text-base">{priceStr}</p>
+            <p className="font-semibold text-base line-clamp-2 leading-snug mb-1.5">{listing.title}</p>
+            <p className="text-primary font-black text-lg">{priceStr}</p>
             <div className="flex items-center justify-between mt-1.5">
-              <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${CONDITION_COLORS[listing.condition] ?? ""}`}>
+              <span className={`text-sm px-2 py-0.5 rounded-full font-medium ${CONDITION_COLORS[listing.condition] ?? ""}`}>
                 {listing.condition.replace("_", " ")}
               </span>
               {listing.location && (
-                <span className="text-xs text-muted-foreground flex items-center gap-0.5 truncate max-w-[100px]">
+                <span className="text-sm text-muted-foreground flex items-center gap-0.5 truncate max-w-[130px]">
                   <MapPin className="w-3 h-3 shrink-0" />
                   <span className="truncate">{listing.location.split(",")[0]}</span>
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1 mt-2 text-sm text-muted-foreground">
               <Eye className="w-3 h-3" />{listing.viewCount}
             </div>
           </div>
@@ -211,14 +211,14 @@ export default function Shop() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6">
+    <div className="ff-wide-shell mx-auto px-4 py-7 xl:py-8">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-7">
         <div className="flex items-center gap-3">
-          <ShoppingBag className="w-7 h-7 text-primary" />
+          <ShoppingBag className="w-8 h-8 text-primary" />
           <div>
-            <h1 className="text-2xl font-bold leading-tight">Sale &amp; Buy Shop</h1>
-            <p className="text-sm text-muted-foreground">Buy and sell in your community</p>
+            <h1 className="text-3xl xl:text-4xl font-black tracking-tight leading-tight">Sale &amp; Buy Shop</h1>
+            <p className="text-base text-muted-foreground mt-1">Buy and sell in your community</p>
           </div>
         </div>
         {user && (
@@ -259,7 +259,7 @@ export default function Shop() {
       {activeTab === "saved" && (
         <>
           {savedQuery.isLoading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-4 xl:gap-5">
               {Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="rounded-xl overflow-hidden border">
                   <Skeleton className="aspect-square w-full" />
@@ -275,7 +275,7 @@ export default function Shop() {
               <Button className="mt-4" variant="outline" onClick={() => setActiveTab("browse")}>Browse listings</Button>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-4 xl:gap-5">
               {(savedQuery.data ?? []).map(renderListingCard)}
             </div>
           )}
@@ -286,7 +286,7 @@ export default function Shop() {
       {activeTab === "browse" && (
         <>
           {/* Search bar */}
-          <div className="flex gap-2 mb-4">
+          <div className="flex gap-3 mb-5">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
@@ -294,7 +294,7 @@ export default function Shop() {
                 onChange={(e) => setSearchInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSearch()}
                 placeholder="Search listings…"
-                className="pl-9"
+                className="pl-9 text-base h-11"
               />
             </div>
             <Button onClick={handleSearch} disabled={!searchInput.trim()}>Search</Button>
@@ -306,9 +306,9 @@ export default function Shop() {
 
           {/* Filters */}
           {showFilters && (
-            <div className="bg-muted/40 rounded-xl p-4 mb-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-muted/40 rounded-xl p-5 mb-5 grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Category</label>
+                <label className="text-sm font-medium text-muted-foreground mb-1.5 block">Category</label>
                 <Select value={category} onValueChange={(v) => { setCategory(v); setPage(0); }}>
                   <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -317,7 +317,7 @@ export default function Shop() {
                 </Select>
               </div>
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Condition</label>
+                <label className="text-sm font-medium text-muted-foreground mb-1.5 block">Condition</label>
                 <Select value={condition} onValueChange={(v) => { setCondition(v); setPage(0); }}>
                   <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -326,11 +326,11 @@ export default function Shop() {
                 </Select>
               </div>
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Min Price</label>
+                <label className="text-sm font-medium text-muted-foreground mb-1.5 block">Min Price</label>
                 <Input value={minPrice} onChange={(e) => { setMinPrice(e.target.value); setPage(0); }} placeholder="0" type="number" min="0" className="h-8 text-sm" />
               </div>
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Max Price</label>
+                <label className="text-sm font-medium text-muted-foreground mb-1.5 block">Max Price</label>
                 <Input value={maxPrice} onChange={(e) => { setMaxPrice(e.target.value); setPage(0); }} placeholder="Any" type="number" min="0" className="h-8 text-sm" />
               </div>
             </div>
@@ -357,7 +357,7 @@ export default function Shop() {
 
           {/* Results */}
           {isLoading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-4 xl:gap-5">
               {Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="rounded-xl overflow-hidden border">
                   <Skeleton className="aspect-square w-full" />
@@ -379,7 +379,7 @@ export default function Shop() {
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-4 xl:gap-5">
                 {listings.map(renderListingCard)}
               </div>
               {/* Pagination */}

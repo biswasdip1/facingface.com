@@ -176,7 +176,7 @@ export default function PageView() {
 
   if (isLoading) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-6">
+      <div className="ff-wide-shell mx-auto px-4 py-6">
         <div className="h-48 rounded-xl bg-muted animate-pulse mb-4" />
         <div className="h-6 w-48 bg-muted animate-pulse rounded mb-2" />
         <div className="h-4 w-64 bg-muted animate-pulse rounded" />
@@ -204,7 +204,7 @@ export default function PageView() {
   const suspendReason = (page as { suspendReason?: string | null }).suspendReason;
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6">
+    <div className="ff-wide-shell mx-auto px-4 py-6">
       {/* Suspended banner */}
       {isSuspended && (
         <div className="mb-5 flex items-start gap-3 rounded-xl border border-red-500/40 bg-red-500/10 px-5 py-4">
@@ -226,7 +226,7 @@ export default function PageView() {
       </Link>
 
       {/* Cover photo */}
-      <div className="relative h-48 md:h-64 rounded-xl overflow-hidden bg-gradient-to-br from-red-500 to-red-700 mb-0">
+      <div className="relative h-52 md:h-72 xl:h-80 rounded-xl overflow-hidden bg-gradient-to-br from-red-500 to-red-700 mb-0">
         {page.coverPhoto && (
           <img src={page.coverPhoto} alt="Cover" className="w-full h-full object-cover" />
         )}
@@ -252,11 +252,11 @@ export default function PageView() {
       </div>
 
       {/* Page header */}
-      <div className="bg-card border border-border rounded-xl -mt-6 mx-4 p-5 shadow-sm mb-5">
+      <div className="bg-card border border-border rounded-xl -mt-7 mx-5 md:mx-8 p-6 xl:p-7 shadow-sm mb-6">
         <div className="flex items-start gap-4">
           {/* Logo with upload */}
           <div className="relative -mt-12 shrink-0 group">
-            <Avatar className="w-20 h-20 border-4 border-background shadow-md">
+            <Avatar className="w-24 h-24 border-4 border-background shadow-md">
               <AvatarImage src={page.logo ?? undefined} />
               <AvatarFallback className="bg-red-600 text-white text-2xl font-bold">
                 {page.name.charAt(0).toUpperCase()}
@@ -286,8 +286,8 @@ export default function PageView() {
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2 flex-wrap">
               <div>
-                <h1 className="text-xl font-bold text-foreground">{page.name}</h1>
-                <p className="text-sm text-muted-foreground">@{page.handle}</p>
+                <h1 className="text-2xl xl:text-3xl font-black text-foreground tracking-tight">{page.name}</h1>
+                <p className="text-base text-muted-foreground mt-0.5">@{page.handle}</p>
               </div>
               <div className="flex items-center gap-2">
                 {page.isAdmin && (
@@ -325,7 +325,7 @@ export default function PageView() {
             </div>
 
             {/* Meta row */}
-            <div className="flex flex-wrap gap-3 mt-2 text-sm text-muted-foreground">
+            <div className="flex flex-wrap gap-3 mt-3 text-base text-muted-foreground">
               {page.category && <Badge variant="secondary">{page.category}</Badge>}
               <Badge variant={page.visibility === "private" ? "outline" : "secondary"}>{page.visibility === "private" ? "Private Page" : "Public Page"}</Badge>
               <span className="flex items-center gap-1">
@@ -350,15 +350,15 @@ export default function PageView() {
             </div>
 
             {page.description && (
-              <p className="mt-2 text-sm text-foreground/80">{page.description}</p>
+              <p className="mt-3 text-base leading-relaxed text-foreground/80">{page.description}</p>
             )}
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,780px)_340px] lg:justify-center gap-6 xl:gap-8">
         {/* Main column */}
-        <div className="md:col-span-2 space-y-4">
+        <div className="space-y-5">
           {/* Post composer (admin only) — full CreatePost with all media types */}
           {page.isAdmin && !isSuspended && (
             <CreatePost
@@ -407,13 +407,13 @@ export default function PageView() {
         </div>
 
         {/* Sidebar */}
-        <div className="space-y-4">
+        <div className="space-y-5">
           {/* About card */}
-          <div className="bg-card border border-border rounded-xl p-4">
-            <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2">
+          <div className="bg-card border border-border rounded-xl p-5">
+            <h3 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2">
               <Building2 className="w-4 h-4 text-red-600" /> About
             </h3>
-            <div className="space-y-2 text-sm text-muted-foreground">
+            <div className="space-y-3 text-base text-muted-foreground">
               {page.description && <p className="text-foreground/80">{page.description}</p>}
               {page.category && (
                 <div className="flex items-center gap-2">
@@ -438,7 +438,7 @@ export default function PageView() {
                 <Users className="w-3.5 h-3.5 shrink-0" />
                 <span><strong className="text-foreground">{page.followerCount ?? 0}</strong> followers</span>
               </div>
-              <div className="text-xs">
+              <div className="text-sm">
                 Created {new Date(page.createdAt).toLocaleDateString()}
               </div>
             </div>

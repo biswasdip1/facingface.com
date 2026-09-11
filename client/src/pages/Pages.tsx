@@ -50,7 +50,7 @@ export default function Pages() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6">
+    <div className="ff-wide-shell mx-auto px-4 py-7 xl:py-8">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
@@ -58,8 +58,8 @@ export default function Pages() {
             <Building2 className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Build your page</h1>
-            <p className="text-sm text-muted-foreground">Discover organisations, brands and communities</p>
+            <h1 className="text-3xl xl:text-4xl font-black tracking-tight text-foreground">Build your page</h1>
+            <p className="text-base text-muted-foreground mt-1">Discover organisations, brands and communities</p>
           </div>
         </div>
         {user && (
@@ -77,13 +77,13 @@ export default function Pages() {
           placeholder="Search pages..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="pl-10"
+          className="pl-10 text-base h-11"
         />
       </div>
 
       {/* Pages Grid */}
       {isLoading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="h-48 rounded-xl bg-muted animate-pulse" />
           ))}
@@ -102,37 +102,37 @@ export default function Pages() {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
           {pages.map((page) => (
             <Link key={page.id} href={`/p/${page.handle}`}>
               <Card className="cursor-pointer hover:shadow-md transition-shadow overflow-hidden group">
                 {/* Cover */}
-                <div className="h-24 bg-gradient-to-br from-red-500 to-red-700 relative overflow-hidden">
+                <div className="h-28 bg-gradient-to-br from-red-500 to-red-700 relative overflow-hidden">
                   {page.coverPhoto && (
                     <img src={page.coverPhoto} alt="" className="w-full h-full object-cover" />
                   )}
                 </div>
-                <CardContent className="pt-0 pb-4 px-4">
+                <CardContent className="pt-0 pb-5 px-5">
                   {/* Logo */}
                   <div className="-mt-6 mb-2">
-                    <Avatar className="w-12 h-12 border-2 border-background shadow">
+                    <Avatar className="w-14 h-14 border-2 border-background shadow">
                       <AvatarImage src={page.logo ?? undefined} />
                       <AvatarFallback className="bg-red-600 text-white text-lg font-bold">
                         {page.name.charAt(0).toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
                   </div>
-                  <h3 className="font-semibold text-foreground group-hover:text-red-600 transition-colors line-clamp-1">
+                  <h3 className="font-bold text-lg text-foreground group-hover:text-red-600 transition-colors line-clamp-1">
                     {page.name}
                   </h3>
-                  <p className="text-xs text-muted-foreground mb-2">@{page.handle}</p>
+                  <p className="text-sm text-muted-foreground mb-2">@{page.handle}</p>
                   {page.category && (
                     <Badge variant="secondary" className="text-xs mb-2">{page.category}</Badge>
                   )}
                   {page.description && (
-                    <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{page.description}</p>
+                    <p className="text-sm text-muted-foreground line-clamp-2 mb-3">{page.description}</p>
                   )}
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-3 text-sm text-muted-foreground">
                     <span className="flex items-center gap-1">
                       <Users className="w-3 h-3" />
                       {page.followerCount ?? 0} followers

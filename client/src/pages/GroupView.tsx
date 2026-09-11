@@ -286,7 +286,7 @@ export default function GroupView() {
 
   if (groupLoading) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-10 flex items-center justify-center">
+      <div className="ff-wide-shell mx-auto px-4 py-10 flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
       </div>
     );
@@ -294,7 +294,7 @@ export default function GroupView() {
 
   if (!group) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-10 text-center">
+      <div className="ff-wide-shell mx-auto px-4 py-10 text-center">
         <Users className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
         <h2 className="text-xl font-semibold">Group not found</h2>
         <p className="text-muted-foreground mt-1">This group doesn't exist or has been removed.</p>
@@ -318,7 +318,7 @@ export default function GroupView() {
   const regularMembers = members.filter((m) => m.role === "member");
 
   return (
-    <div className="max-w-5xl mx-auto px-4 pb-10">
+    <div className="ff-wide-shell mx-auto px-4 pb-12">
       {/* Back link */}
       <div className="py-3">
         <Link href="/g">
@@ -344,7 +344,7 @@ export default function GroupView() {
       )}
 
       {/* Cover photo */}
-      <div className="relative rounded-xl overflow-hidden h-52 bg-gradient-to-br from-primary/30 to-primary/10 mb-0">
+      <div className="relative rounded-xl overflow-hidden h-56 md:h-72 xl:h-80 bg-gradient-to-br from-primary/30 to-primary/10 mb-0">
         {group.coverPhoto ? (
           <img src={group.coverPhoto} alt={group.name} className="w-full h-full object-cover" />
         ) : (
@@ -368,11 +368,11 @@ export default function GroupView() {
       </div>
 
       {/* Group header */}
-      <div className="bg-card border border-border border-t-0 rounded-b-xl px-6 pt-4 pb-5 mb-4 shadow-sm">
+      <div className="bg-card border border-border border-t-0 rounded-b-xl px-6 md:px-8 pt-5 pb-6 mb-6 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold">{group.name}</h1>
-            <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground flex-wrap">
+            <h1 className="text-3xl xl:text-4xl font-black tracking-tight">{group.name}</h1>
+            <div className="flex items-center gap-2 mt-2 text-base text-muted-foreground flex-wrap">
               <Globe className="w-4 h-4" />
               <span>{group.visibility === "private" ? "Private Group" : "Public Group"}</span>
               <span>·</span>
@@ -386,7 +386,7 @@ export default function GroupView() {
               )}
             </div>
             {group.description && (
-              <p className="text-sm text-muted-foreground mt-2 max-w-xl">{group.description}</p>
+              <p className="text-base leading-relaxed text-muted-foreground mt-3 max-w-3xl">{group.description}</p>
             )}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
@@ -444,9 +444,9 @@ export default function GroupView() {
       </div>
 
       {/* Main content */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,820px)_340px] xl:justify-center gap-6 xl:gap-8">
         {/* Left: Posts */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="space-y-5">
           {/* Post composer — members only */}
           {user && isMember && !isSuspended && (
             <CreatePost
@@ -507,17 +507,17 @@ export default function GroupView() {
         </div>
 
         {/* Right: Sidebar */}
-        <div className="space-y-4">
+        <div className="space-y-5">
           {/* About */}
-          <div className="bg-card border border-border rounded-xl p-4">
-            <h3 className="font-semibold mb-2">About</h3>
+          <div className="bg-card border border-border rounded-xl p-5">
+            <h3 className="text-lg font-bold mb-3">About</h3>
             {group.description ? (
-              <p className="text-sm text-muted-foreground">{group.description}</p>
+              <p className="text-base text-muted-foreground leading-relaxed">{group.description}</p>
             ) : (
-              <p className="text-sm text-muted-foreground italic">No description yet.</p>
+              <p className="text-base text-muted-foreground italic">No description yet.</p>
             )}
             <Separator className="my-3" />
-            <div className="space-y-2 text-sm">
+            <div className="space-y-3 text-base">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Globe className="w-4 h-4" />
                 <span>{group.visibility === "private" ? "Private — approved members can see posts" : "Public — anyone can see posts"}</span>
@@ -533,9 +533,9 @@ export default function GroupView() {
           <div className="bg-card border border-border rounded-xl p-4">
             <Tabs defaultValue="members">
               <TabsList className="w-full mb-3">
-                <TabsTrigger value="members" className="flex-1 text-xs">Members ({members.length})</TabsTrigger>
-                {isAdmin && <TabsTrigger value="manage" className="flex-1 text-xs">Manage</TabsTrigger>}
-                {isAdmin && group.visibility === "private" && <TabsTrigger value="requests" className="flex-1 text-xs">Requests ({joinRequests?.length ?? 0})</TabsTrigger>}
+                <TabsTrigger value="members" className="flex-1 text-sm">Members ({members.length})</TabsTrigger>
+                {isAdmin && <TabsTrigger value="manage" className="flex-1 text-sm">Manage</TabsTrigger>}
+                {isAdmin && group.visibility === "private" && <TabsTrigger value="requests" className="flex-1 text-sm">Requests ({joinRequests?.length ?? 0})</TabsTrigger>}
               </TabsList>
 
               <TabsContent value="members" className="space-y-2 max-h-80 overflow-y-auto">

@@ -238,6 +238,10 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
   const videoRef = useRef<HTMLInputElement>(null);
 
   const [uploading, setUploading] = useState(false);
+  // This stays true for the entire publish workflow, including the small gap
+  // between a completed media upload and the final post record being created.
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submitInFlightRef = useRef(false);
   const [uploadProgress, setUploadProgress] = useState(0); // 0-100
   const [uploadPhotoIndex, setUploadPhotoIndex] = useState(0); // 1-based current photo being uploaded
 
@@ -610,6 +614,8 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Guard both the visible button and very fast double clicks / keyboard submits.
+    if (submitInFlightRef.current) return;
     if (!text.trim() && photoFiles.length === 0 && !videoFile && !showPoll && !docFile && !audioFile && taggedFriendIds.length === 0 && !feeling && !checkInLocation.trim()) {
       toast.error("Please add text, media, a poll, a document, audio, a tag, a feeling, or a check-in.");
       return;
@@ -620,6 +626,9 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
       if (validOptions.length < 2) { toast.error("At least 2 poll options are required."); return; }
     }
 
+    submitInFlightRef.current = true;
+    setIsSubmitting(true);
+    try {
     let mediaUrl: string | undefined;
     let photo2Url: string | undefined;
     let photo3Url: string | undefined;
@@ -811,15 +820,24 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
     }
 
     if (groupHandle) {
-      createGroupPost.mutate({ handle: groupHandle, content: fullPayload.text, ...fullPayload });
+      await createGroupPost.mutateAsync({ handle: groupHandle, content: fullPayload.text, ...fullPayload });
     } else if (pageHandle) {
-      createPagePost.mutate({ handle: pageHandle, ...fullPayload });
+      await createPagePost.mutateAsync({ handle: pageHandle, ...fullPayload });
     } else {
-      createPost.mutate({ ...fullPayload, ...normalPostExtras, audience });
+      await createPost.mutateAsync({ ...fullPayload, ...normalPostExtras, audience });
+    }
+    } catch {
+      // Each upload and post mutation already shows its controlled error message.
+    } finally {
+      setUploading(false);
+      setUploadProgress(0);
+      setUploadPhotoIndex(0);
+      submitInFlightRef.current = false;
+      setIsSubmitting(false);
     }
   };
 
-  const isLoading = uploading || createPost.isPending || createPagePost.isPending || createGroupPost.isPending;
+  const isLoading = isSubmitting || uploading || createPost.isPending || createPagePost.isPending || createGroupPost.isPending;
 
 
   const showPreviewCard = !previewDismissed && !showPoll && previewUrl && (previewLoading || preview);
@@ -1800,7 +1818,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
             className="px-6 py-2 rounded-full bg-[var(--its-red)] text-white text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center gap-2"
           >
             {isLoading && <Loader2 size={13} className="animate-spin" />}
-            {uploading ? "Uploading..." : createPost.isPending ? "Publishing..." : scheduledAt ? "Schedule" : "Post"}
+            {isSubmitting ? (uploading ? "Uploading..." : "Posting...") : scheduledAt ? "Schedule" : "Post"}
           </button>
         </div>
 
