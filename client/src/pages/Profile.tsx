@@ -100,6 +100,14 @@ export default function Profile() {
   });
   const getOrCreateConv = trpc.dm.getOrCreate.useMutation({
     onSuccess: (conversation) => {
+      // Floating individual chats are a desktop feature. On mobile, open the
+      // existing full Messages screen with the newly authorized conversation
+      // selected so the Profile Message button always has a working destination.
+      if (window.matchMedia("(max-width: 767px)").matches) {
+        navigate(`/messages?conv=${conversation.id}`);
+        return;
+      }
+
       const peer = profileData?.user;
       window.dispatchEvent(new CustomEvent("facingface:open-dm", {
         detail: {
