@@ -1146,3 +1146,22 @@ export const suggestedPageExclusions = pgTable("suggested_page_exclusions", {
 });
 export type SuggestedPageExclusion = typeof suggestedPageExclusions.$inferSelect;
 export type InsertSuggestedPageExclusion = typeof suggestedPageExclusions.$inferInsert;
+
+// ─── Website Notice pop-up ──────────────────────────────────────────────────
+// A single administrator-managed record provides a concise, dismissible notice
+// to visitors and returning members. Incrementing `version` makes a newly
+// published notice appear once again without storing user-level tracking data.
+export const websiteNotices = pgTable("website_notices", {
+  id: integer("id").primaryKey().default(1),
+  title: varchar("title", { length: 180 }).notNull(),
+  message: text("message").notNull(),
+  imageUrl: text("imageUrl"),
+  videoUrl: varchar("videoUrl", { length: 500 }),
+  isVisible: boolean("isVisible").default(false).notNull(),
+  version: integer("version").default(1).notNull(),
+  updatedByUserId: integer("updatedByUserId").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type WebsiteNotice = typeof websiteNotices.$inferSelect;
+export type InsertWebsiteNotice = typeof websiteNotices.$inferInsert;

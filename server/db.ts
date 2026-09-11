@@ -143,6 +143,7 @@ import {
   InsertInactiveUserReminder,
   peopleYouMayKnowExclusions,
   suggestedPageExclusions,
+  websiteNotices,
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
@@ -397,6 +398,99 @@ export async function ensurePeopleYouMayKnowStorage(): Promise<boolean> {
   }
 }
 
+let websiteNoticeStorageReady = false;
+export async function ensureWebsiteNoticeStorage(): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  if (websiteNoticeStorageReady) return true;
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS "website_notices" (
+        "id" integer PRIMARY KEY NOT NULL DEFAULT 1,
+        "title" varchar(180) NOT NULL,
+        "message" text NOT NULL,
+        "imageUrl" text,
+        "videoUrl" varchar(500),
+        "isVisible" boolean NOT NULL DEFAULT false,
+        "version" integer NOT NULL DEFAULT 1,
+        "updatedByUserId" integer REFERENCES "users"("id") ON DELETE SET NULL,
+        "createdAt" timestamp DEFAULT now() NOT NULL,
+        "updatedAt" timestamp DEFAULT now() NOT NULL,
+        CHECK ("id" = 1)
+      )
+    `);
+    const columns = await existingColumns("website_notices");
+    if (!columns.has("imageUrl")) await db.execute(sql`ALTER TABLE "website_notices" ADD COLUMN "imageUrl" text`);
+    if (!columns.has("videoUrl")) await db.execute(sql`ALTER TABLE "website_notices" ADD COLUMN "videoUrl" varchar(500)`);
+    if (!columns.has("isVisible")) await db.execute(sql`ALTER TABLE "website_notices" ADD COLUMN "isVisible" boolean NOT NULL DEFAULT false`);
+    if (!columns.has("version")) await db.execute(sql`ALTER TABLE "website_notices" ADD COLUMN "version" integer NOT NULL DEFAULT 1`);
+    if (!columns.has("updatedByUserId")) await db.execute(sql`ALTER TABLE "website_notices" ADD COLUMN "updatedByUserId" integer`);
+    if (!columns.has("createdAt")) await db.execute(sql`ALTER TABLE "website_notices" ADD COLUMN "createdAt" timestamp DEFAULT now() NOT NULL`);
+    if (!columns.has("updatedAt")) await db.execute(sql`ALTER TABLE "website_notices" ADD COLUMN "updatedAt" timestamp DEFAULT now() NOT NULL`);
+    websiteNoticeStorageReady = true;
+    return true;
+  } catch (error) {
+    console.warn("[WebsiteNotice] Notice storage is unavailable.", error instanceof Error ? error.message : error);
+    return false;
+  }
+}
+
+export type WebsiteNoticeDraft = {
+  title: string;
+  message: string;
+  imageUrl?: string | null;
+  videoUrl?: string | null;
+  isVisible: boolean;
+  updatedByUserId: number;
+};
+
+export async function getWebsiteNotice() {
+  if (!(await ensureWebsiteNoticeStorage())) return null;
+  const db = await getDb();
+  if (!db) return null;
+  const [notice] = await db.select().from(websiteNotices).where(eq(websiteNotices.id, 1)).limit(1);
+  return notice ?? null;
+}
+
+export async function getActiveWebsiteNotice() {
+  const notice = await getWebsiteNotice();
+  return notice?.isVisible ? notice : null;
+}
+
+export async function saveWebsiteNotice(input: WebsiteNoticeDraft) {
+  if (!(await ensureWebsiteNoticeStorage())) throw new Error("Website Notice storage is unavailable.");
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable.");
+  const current = await getWebsiteNotice();
+  const version = (current?.version ?? 0) + 1;
+  const now = new Date();
+  const [notice] = await db.insert(websiteNotices).values({
+    id: 1,
+    title: input.title,
+    message: input.message,
+    imageUrl: input.imageUrl ?? null,
+    videoUrl: input.videoUrl ?? null,
+    isVisible: input.isVisible,
+    version,
+    updatedByUserId: input.updatedByUserId,
+    createdAt: current?.createdAt ?? now,
+    updatedAt: now,
+  }).onConflictDoUpdate({
+    target: websiteNotices.id,
+    set: {
+      title: input.title,
+      message: input.message,
+      imageUrl: input.imageUrl ?? null,
+      videoUrl: input.videoUrl ?? null,
+      isVisible: input.isVisible,
+      version,
+      updatedByUserId: input.updatedByUserId,
+      updatedAt: now,
+    },
+  }).returning();
+  return notice;
+}
+
 let suggestedPageStorageReady = false;
 export async function ensureSuggestedPageStorage(): Promise<boolean> {
   const db = await getDb();
@@ -604,6 +698,7 @@ export async function ensureLegacyRuntimeSchema(): Promise<void> {
     await ensureSocialEventStorage();
     await ensurePeopleYouMayKnowStorage();
     await ensureSuggestedPageStorage();
+    await ensureWebsiteNoticeStorage();
 
     if (await relationExists("reel_likes")) {
       // Duplicate rows represent repeated clicks rather than separate people.

@@ -378,8 +378,12 @@ import {
   getPeopleYouMayKnowAdminCandidates,
   excludePeopleYouMayKnowUser,
   getInactiveReminderSummary,
+  getActiveWebsiteNotice,
+  getWebsiteNotice,
+  saveWebsiteNotice,
 } from "./db";
 import { emitFriendPostFlash, getFriendPostAlertRecipients } from "./callSignaling";
+import { isManagedWebsiteNoticeImageUrl, isSupportedWebsiteNoticeVideoUrl } from "./websiteNoticeAccess";
 
 
 import { stripe, getOrCreateBadgePrice } from "./stripe";
@@ -2183,6 +2187,13 @@ const dmRouter = router({
       return { mutedUntil: mutedUntil ? mutedUntil.getTime() : null };
     }),
 });
+// ─── Website Notice ───────────────────────────────────────────────────────────
+// Public by design: this returns only the currently visible announcement and
+// contains no private account or administrator information.
+const websiteNoticeRouter = router({
+  getActive: publicProcedure.query(async () => getActiveWebsiteNotice()),
+});
+
 // ─── Admin Routerr ─────────────────────────────────────────────────────────────
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   if (ctx.user.role !== "admin" && ctx.user.role !== "super_admin") throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required." });
@@ -2535,6 +2546,42 @@ const adminRouter = router({
       });
       return { success: true, processed: targets.length };
     }),
+  // ── Website Notice pop-up management ────────────────────────────────────
+  getWebsiteNotice: superAdminProcedure.query(async () => getWebsiteNotice()),
+  saveWebsiteNotice: superAdminProcedure
+    .input(z.object({
+      title: z.string().trim().min(1).max(180),
+      message: z.string().trim().min(1).max(5000),
+      imageUrl: z.string().max(1000).nullable().optional(),
+      videoUrl: z.string().max(500).nullable().optional(),
+      isVisible: z.boolean(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const imageUrl = input.imageUrl?.trim() || null;
+      const videoUrl = input.videoUrl?.trim() || null;
+      if (!isManagedWebsiteNoticeImageUrl(imageUrl)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Notice photos must use a FacingFace uploaded media file." });
+      }
+      if (!isSupportedWebsiteNoticeVideoUrl(videoUrl)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Use a valid HTTPS YouTube or Vimeo video link." });
+      }
+      const notice = await saveWebsiteNotice({
+        title: input.title,
+        message: input.message,
+        imageUrl,
+        videoUrl,
+        isVisible: input.isVisible,
+        updatedByUserId: ctx.user.id,
+      });
+      await insertAuditLog({
+        actorId: ctx.user.id,
+        actorName: ctx.user.name ?? undefined,
+        action: input.isVisible ? "publish_website_notice" : "hide_website_notice",
+        metadata: JSON.stringify({ version: notice.version, hasImage: Boolean(imageUrl), hasVideo: Boolean(videoUrl) }),
+      });
+      return notice;
+    }),
+
   // ── Suggested Pages Management ─────────────────────────────────────────
   getSuggestedPages: superAdminProcedure
     .input(z.object({ limit: z.number().min(1).max(200).default(100), offset: z.number().min(0).default(0) }))
@@ -5319,6 +5366,7 @@ export const appRouter = router({
   friends: friendsRouter,
   dm: dmRouter,
   admin: adminRouter,
+  websiteNotice: websiteNoticeRouter,
   groups: groupsRouter,
   calls: callsRouter,
   photos: photosRouter,

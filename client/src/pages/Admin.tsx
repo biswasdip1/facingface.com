@@ -8,9 +8,11 @@ import {
   Trash2, CheckCircle, Ban, UserCheck, BadgeCheck, XCircle, ClipboardList,
   ShoppingBag, Eye, AlertTriangle, FileImage, FileVideo, FileAudio, FileText,
   Globe, UsersRound, MessageSquareWarning, Search, BarChart2, Radio, Newspaper,
-  Mail, HardDrive, Activity, ExternalLink, RefreshCw, ShieldAlert, Building2,
+  Mail, HardDrive, Activity, ExternalLink, RefreshCw, ShieldAlert, Building2, BellRing, Upload,
 } from "lucide-react";
 import { BroadcastComposer, BroadcastsList } from "@/components/BroadcastUI";
+import { WebsiteNoticeContent, type WebsiteNoticeData } from "@/components/WebsiteNoticePopup";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 
 type Tab =
@@ -29,6 +31,7 @@ type Tab =
   | "advertisements"
   | "news_feed"
   | "email_notice"
+  | "website_notice"
   | "people_you_may_know"
   | "suggested_pages"
   | "email_reminders"
@@ -104,6 +107,7 @@ export default function Admin() {
     { id: "advertisements", label: "Advertisements", icon: Radio },
     { id: "news_feed", label: "News Feed", icon: Newspaper },
     { id: "email_notice", label: "E-mail/Notice", icon: Mail },
+    { id: "website_notice", label: "Website Notice", icon: BellRing, superOnly: true },
     { id: "people_you_may_know", label: "People You May Know", icon: Users, superOnly: true },
     { id: "suggested_pages", label: "Suggested Pages", icon: Building2, superOnly: true },
     { id: "email_reminders", label: "Email Reminders", icon: Mail },
@@ -222,6 +226,7 @@ export default function Admin() {
             </div>
           </div>
         )}
+        {activeTab === "website_notice" && <WebsiteNoticeTab />}
         {activeTab === "people_you_may_know" && <PeopleYouMayKnowTab />}
         {activeTab === "suggested_pages" && <SuggestedPagesTab />}
         {activeTab === "email_reminders" && <EmailRemindersTab />}
@@ -2445,6 +2450,122 @@ function PeopleYouMayKnowTab() {
   );
 }
 
+
+// ─── Website Notice Tab ──────────────────────────────────────────────────────
+function WebsiteNoticeTab() {
+  const utils = trpc.useUtils();
+  const { data: notice, isLoading } = trpc.admin.getWebsiteNotice.useQuery();
+  const [title, setTitle] = useState("");
+  const [message, setMessage] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
+  const [videoUrl, setVideoUrl] = useState("");
+  const [isVisible, setIsVisible] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  useEffect(() => {
+    setTitle(notice?.title ?? "");
+    setMessage(notice?.message ?? "");
+    setImageUrl(notice?.imageUrl ?? "");
+    setVideoUrl(notice?.videoUrl ?? "");
+    setIsVisible(notice?.isVisible ?? false);
+  }, [notice?.updatedAt]);
+
+  const saveNotice = trpc.admin.saveWebsiteNotice.useMutation({
+    onSuccess: (saved) => {
+      utils.admin.getWebsiteNotice.invalidate();
+      utils.websiteNotice.getActive.invalidate();
+      setTitle(saved.title);
+      setMessage(saved.message);
+      setImageUrl(saved.imageUrl ?? "");
+      setVideoUrl(saved.videoUrl ?? "");
+      setIsVisible(saved.isVisible);
+      toast.success(saved.isVisible ? "Website notice published." : "Website notice saved as hidden.");
+    },
+    onError: (error) => toast.error(error.message || "Website notice could not be saved."),
+  });
+  const uploadMedia = trpc.media.upload.useMutation();
+
+  const save = (visible: boolean) => {
+    if (!title.trim()) return toast.error("Please enter a notice title.");
+    if (!message.trim()) return toast.error("Please enter a notice message.");
+    saveNotice.mutate({
+      title: title.trim(),
+      message: message.trim(),
+      imageUrl: imageUrl.trim() || null,
+      videoUrl: videoUrl.trim() || null,
+      isVisible: visible,
+    });
+  };
+
+  const handlePhotoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { toast.error("Please choose an image file."); return; }
+    if (file.size > 10 * 1024 * 1024) { toast.error("Notice photos must be 10 MB or smaller."); return; }
+    setUploading(true);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const base64 = String(reader.result).split(",")[1] ?? "";
+        const result = await uploadMedia.mutateAsync({ filename: file.name, contentType: file.type, base64, mediaType: "image" });
+        setImageUrl(result.url);
+        toast.success("Notice photo uploaded and ready to publish.");
+      } catch (error: any) {
+        toast.error(error?.message || "Notice photo upload failed.");
+      } finally {
+        setUploading(false);
+        event.target.value = "";
+      }
+    };
+    reader.onerror = () => { setUploading(false); toast.error("Notice photo upload failed."); };
+    reader.readAsDataURL(file);
+  };
+
+  const previewNotice: WebsiteNoticeData = { title: title.trim() || "Website notice", message: message.trim() || "Your notice message will appear here.", imageUrl: imageUrl.trim() || null, videoUrl: videoUrl.trim() || null, version: notice?.version ?? 1 };
+
+  if (isLoading) return <LoadingSpinner />;
+  return (
+    <div className="space-y-5">
+      <div className="rounded-xl border p-5 sm:p-6" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }}>
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-3">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: "rgba(230, 51, 41, 0.12)", color: "var(--its-red)" }}><BellRing size={21} /></span>
+            <div>
+              <h2 className="text-xl font-bold">Website notice pop-up</h2>
+              <p className="mt-1 max-w-2xl text-sm" style={{ color: "var(--its-text-muted)" }}>Publish an occasional message, photo, or video link. It appears once over the login page and once when a signed-in member returns.</p>
+            </div>
+          </div>
+          <span className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold" style={{ backgroundColor: isVisible ? "#dcfce7" : "#f3f4f6", color: isVisible ? "#166534" : "#4b5563" }}><span className={`h-2 w-2 rounded-full ${isVisible ? "bg-green-600" : "bg-gray-400"}`} />{isVisible ? "Visible to visitors" : "Hidden / draft"}</span>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
+          <div className="space-y-4">
+            <label className="block"><span className="mb-1.5 block text-sm font-bold">Notice title</span><input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={180} placeholder="For example: Important FacingFace update" className="w-full rounded-lg border bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[var(--its-red)]/30" style={{ borderColor: "var(--its-border)" }} /></label>
+            <label className="block"><span className="mb-1.5 block text-sm font-bold">Notice message</span><textarea value={message} onChange={(event) => setMessage(event.target.value)} maxLength={5000} rows={9} placeholder="Write a clear, friendly message for visitors and members." className="w-full resize-y rounded-lg border bg-background px-3 py-2.5 text-sm leading-6 outline-none focus:ring-2 focus:ring-[var(--its-red)]/30" style={{ borderColor: "var(--its-border)" }} /></label>
+          </div>
+
+          <div className="space-y-4">
+            <div><p className="mb-1.5 text-sm font-bold">Photo <span className="font-normal" style={{ color: "var(--its-text-muted)" }}>(optional)</span></p><label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition-colors hover:bg-muted" style={{ borderColor: "var(--its-border)" }}><Upload size={16} />{uploading ? "Uploading…" : "Upload photo"}<input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} disabled={uploading} /></label>{imageUrl && <div className="mt-3 overflow-hidden rounded-lg border" style={{ borderColor: "var(--its-border)" }}><img src={imageUrl} alt="Notice upload preview" className="h-32 w-full object-cover" /><div className="flex items-center justify-between gap-2 p-2"><span className="truncate text-xs" style={{ color: "var(--its-text-muted)" }}>Photo attached and ready to publish</span><button type="button" onClick={() => setImageUrl("")} className="text-xs font-bold text-red-600 hover:underline">Remove</button></div></div>}</div>
+            <label className="block"><span className="mb-1.5 block text-sm font-bold">Video URL <span className="font-normal" style={{ color: "var(--its-text-muted)" }}>(optional)</span></span><input value={videoUrl} onChange={(event) => setVideoUrl(event.target.value)} maxLength={500} placeholder="https://www.youtube.com/watch?v=…" className="w-full rounded-lg border bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[var(--its-red)]/30" style={{ borderColor: "var(--its-border)" }} /><p className="mt-1.5 text-xs" style={{ color: "var(--its-text-muted)" }}>Use a secure YouTube or Vimeo link. It will play directly in the pop-up.</p></label>
+            <div className="rounded-lg p-3 text-xs" style={{ backgroundColor: "rgba(245, 158, 11, 0.10)", color: "#92400e" }}><strong>Tip:</strong> Publish only important announcements. Saving or publishing a new version makes it appear once again to visitors and members.</div>
+          </div>
+        </div>
+
+        <div className="mt-6 flex flex-wrap items-center gap-3 border-t pt-5" style={{ borderColor: "var(--its-border)" }}>
+          <button type="button" onClick={() => save(false)} disabled={saveNotice.isPending || uploading} className="rounded-lg border px-4 py-2.5 text-sm font-bold transition-colors hover:bg-muted disabled:opacity-50" style={{ borderColor: "var(--its-border)" }}>{saveNotice.isPending ? "Saving…" : "Save as hidden"}</button>
+          <button type="button" onClick={() => setPreviewOpen(true)} disabled={uploading} className="rounded-lg border px-4 py-2.5 text-sm font-bold transition-colors hover:bg-muted disabled:opacity-50" style={{ borderColor: "var(--its-border)" }}>Preview pop-up</button>
+          <button type="button" onClick={() => save(true)} disabled={saveNotice.isPending || uploading} className="rounded-lg px-5 py-2.5 text-sm font-bold text-white transition-opacity disabled:opacity-50" style={{ backgroundColor: "var(--its-red)" }}>{saveNotice.isPending ? "Publishing…" : "Publish notice"}</button>
+          {isVisible && <button type="button" onClick={() => save(false)} disabled={saveNotice.isPending || uploading} className="ml-auto text-sm font-bold text-red-600 hover:underline disabled:opacity-50">Hide notice now</button>}
+        </div>
+      </div>
+
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-xl overflow-hidden border-0 bg-transparent p-0 shadow-none sm:rounded-2xl"><DialogTitle className="sr-only">Website notice preview</DialogTitle><WebsiteNoticeContent notice={previewNotice} onClose={() => setPreviewOpen(false)} /></DialogContent>
+      </Dialog>
+    </div>
+  );
+}
 
 // ─── Suggested Pages Tab ──────────────────────────────────────────────────────
 function SuggestedPagesTab() {

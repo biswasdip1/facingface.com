@@ -57,6 +57,7 @@ import BirthdaysPage from "./pages/Birthdays";
 import EventsPage from "./pages/Events";
 import Reels, { ReelShareCard } from "./pages/Reels";
 import CallModal from "./components/CallModal";
+import WebsiteNoticePopup from "./components/WebsiteNoticePopup";
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading } = useAuth();
@@ -77,7 +78,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   if (!isAuthenticated) {
-    return <Landing />;
+    return <><Landing /><WebsiteNoticePopup scope="visitor" /></>;
   }
 
   return <>{children}</>;
@@ -255,6 +256,7 @@ function AppLayout() {
           onClose={() => setGlobalIncomingCall(null)}
         />
       )}
+      <WebsiteNoticePopup scope="member" userId={user?.id} />
       <NetworkStatusBanner />
       <NavBar />
       <MobileBottomNav />
