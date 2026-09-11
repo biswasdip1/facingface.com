@@ -7,7 +7,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Paperclip, Send, ArrowLeft, MessageCircle, Download,
-  Phone, Video, CheckCheck, Check, BadgeCheck, Search, Smile, Image as ImageIcon, X, ChevronUp, ChevronDown, Trash2,
+  Phone, Video, Camera, CheckCheck, Check, BadgeCheck, Search, Smile, Image as ImageIcon, X, ChevronUp, ChevronDown, Trash2,
   Mic, MicOff, Share2, Pin, PinOff, Gift, Users, Bell, BellOff
 } from "lucide-react";
 import { toast } from "sonner";
@@ -246,6 +246,7 @@ export default function Messages() {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const utils = trpc.useUtils();
@@ -826,7 +827,7 @@ export default function Messages() {
               return (
                 <button
                   key={conv.id}
-                  onClick={() => setActiveConvId(conv.id)}
+                  onClick={() => navigate(`/messages?conv=${conv.id}`)}
                   className={cn(
                     "w-full flex items-center gap-3 px-4 py-3.5 transition-colors text-left relative",
                     isActive
@@ -978,13 +979,14 @@ export default function Messages() {
             <>
               {/* ── Thread Header ── */}
               <div
-                className="flex items-center gap-3 px-3 py-2.5 border-b shadow-sm flex-shrink-0"
+                className="sticky top-0 z-30 flex items-center gap-3 px-3 py-2.5 border-b shadow-sm flex-shrink-0"
                 style={{ borderColor: "var(--its-border)", background: "var(--its-bg)" }}
               >
                 {/* Back button (mobile) */}
                 <button
                   className="md:hidden p-1.5 rounded-full hover:bg-muted/50 transition-colors"
                   onClick={() => {
+                    navigate("/messages");
                     setActiveConvId(null);
                     setShowMsgSearch(false);
                     setMsgSearchQuery("");
@@ -1035,7 +1037,7 @@ export default function Messages() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className={cn("rounded-full w-9 h-9", isDmMuted && "bg-muted/60")}
+                    className={cn("hidden sm:inline-flex rounded-full w-9 h-9", isDmMuted && "bg-muted/60")}
                     title={isDmMuted ? "Unmute notifications" : "Mute notifications"}
                     onClick={() => muteDmMutation.mutate({
                       conversationId: activeConvId!,
@@ -1049,7 +1051,7 @@ export default function Messages() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className={cn("rounded-full w-9 h-9 relative", showPinnedPanel && "bg-primary/10")}
+                      className={cn("hidden sm:inline-flex rounded-full w-9 h-9 relative", showPinnedPanel && "bg-primary/10")}
                       title="Pinned messages"
                       onClick={() => setShowPinnedPanel((v) => !v)}
                     >
@@ -1063,7 +1065,7 @@ export default function Messages() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className={cn("rounded-full w-9 h-9", showMsgSearch && "bg-primary/10")}
+                    className={cn("hidden sm:inline-flex rounded-full w-9 h-9", showMsgSearch && "bg-primary/10")}
                     title="Search messages"
                     onClick={() => {
                       setShowMsgSearch((v) => !v);
@@ -1608,6 +1610,25 @@ export default function Messages() {
                   accept="image/*"
                   onChange={(e) => handleFileChange(e, true)}
                 />
+                <input
+                  ref={cameraInputRef}
+                  type="file"
+                  className="hidden"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(e) => handleFileChange(e, true)}
+                />
+
+                {/* Take and send a photo (mobile) */}
+                <button
+                  className="sm:hidden p-2 rounded-full hover:bg-muted/50 transition-colors flex-shrink-0 mb-0.5"
+                  title="Camera"
+                  aria-label="Take photo"
+                  onClick={() => cameraInputRef.current?.click()}
+                  disabled={uploading || sendMutation.isPending}
+                >
+                  <Camera className="w-5 h-5" style={{ color: "var(--its-primary)" }} />
+                </button>
 
                 {/* Attach image */}
                 <button

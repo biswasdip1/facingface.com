@@ -87,7 +87,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
 function AppLayout() {
   const { user } = useAuth();
-  const [, navigate] = useLocation();
+  const [location, navigate] = useLocation();
+  const isOpenMobileConversation = location.startsWith("/messages") && new URLSearchParams(window.location.search).has("conv");
 
   // ── Global incoming call state ─────────────────────────────────────────────
   const [globalIncomingCall, setGlobalIncomingCall] = useState<{
@@ -268,7 +269,7 @@ function AppLayout() {
       <NetworkStatusBanner />
       <NavBar />
       <MobileBottomNav />
-      <main className="pt-16 pb-16 sm:pb-0">
+      <main className={isOpenMobileConversation ? "pt-16 sm:pb-0" : "pt-16 pb-16 sm:pb-0"}>
         <Switch>
           <Route path="/" component={Feed} />
           <Route path="/profile/:id?" component={Profile} />

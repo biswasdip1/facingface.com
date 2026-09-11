@@ -32,6 +32,12 @@ export default function MobileBottomNav() {
 
   if (!user) return null;
 
+  // A direct-message thread needs the full mobile screen for the sticky
+  // conversation header, calling controls, and composer. The normal bottom
+  // navigation remains available in the Messages list and on every other page.
+  const isOpenDirectConversation = location.startsWith("/messages") && new URLSearchParams(window.location.search).has("conv");
+  if (isOpenDirectConversation) return null;
+
   const msgCount        = (unreadMessages as { count?: number } | undefined)?.count ?? 0;
   const friendCount     = friendPendingData?.count ?? 0;
   const missedCallCount = missedCallData?.count ?? 0;
