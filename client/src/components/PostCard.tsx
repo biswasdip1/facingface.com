@@ -212,6 +212,10 @@ interface PostCardProps {
   /** When true, show Pin/Unpin option (only on profile page) */
   showPinActions?: boolean;
   onPinChange?: () => void;
+  /** Used by the focused media post view to avoid duplicating the large media on the details side. */
+  hideMedia?: boolean;
+  /** Opens the existing complete comment thread immediately in a focused post view. */
+  initialCommentsOpen?: boolean;
 }
 
 // ─── Photo Lightbox ───────────────────────────────────────────────────────────
@@ -828,7 +832,7 @@ function formatDuration(secs: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-function VideoPlayer({ src, poster }: { src: string; poster?: string | null }) {
+function VideoPlayer({ src, poster, onOpen }: { src: string; poster?: string | null; onOpen?: () => void }) {
   const [playing, setPlaying] = useState(false);
   const [thumbLoaded, setThumbLoaded] = useState(false);
   const [thumbError, setThumbError] = useState(false);
@@ -836,6 +840,10 @@ function VideoPlayer({ src, poster }: { src: string; poster?: string | null }) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const handlePlay = () => {
+    if (onOpen) {
+      onOpen();
+      return;
+    }
     setPlaying(true);
     setTimeout(() => videoRef.current?.play(), 50);
   };
@@ -874,7 +882,7 @@ function VideoPlayer({ src, poster }: { src: string; poster?: string | null }) {
             type="button"
             onClick={handlePlay}
             className="absolute inset-0 flex items-center justify-center focus:outline-none group"
-            aria-label="Play video"
+            aria-label={onOpen ? "Open video post" : "Play video"}
           >
             <div className="w-16 h-16 rounded-full bg-black/60 flex items-center justify-center border-2 border-white/80 group-hover:bg-black/80 group-hover:scale-110 transition-all duration-150">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="white">
@@ -1002,13 +1010,14 @@ function LatestCommentPreview({ postId, commentCount, onOpenComments }: { postId
 
 // ─── PostCard ─────────────────────────────────────────────────────────────────────────────
 
-export default function PostCard({ post, author, likeCount, commentCount = 0, isLiked, onDelete, resharedPost, resharedAuthor, authorHasStory, showPinActions, onPinChange }: PostCardProps) {
+export default function PostCard({ post, author, likeCount, commentCount = 0, isLiked, onDelete, resharedPost, resharedAuthor, authorHasStory, showPinActions, onPinChange, hideMedia = false, initialCommentsOpen = false }: PostCardProps) {
   const { user } = useAuth();
+  const [, navigate] = useLocation();
   const utils = trpc.useUtils();
-  const [showComments, setShowComments] = useState(false);
+  const [showComments, setShowComments] = useState(initialCommentsOpen);
   const [liked, setLiked] = useState(isLiked);
   const [likes, setLikes] = useState(likeCount);
-  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const openFocusedMedia = (mediaIndex = 0) => navigate(`/post/${post.id}?media=${mediaIndex}`);
 
   useEffect(() => {
     setLiked(isLiked);
@@ -1237,9 +1246,6 @@ export default function PostCard({ post, author, likeCount, commentCount = 0, is
 
   return (
     <>
-      {lightboxIndex !== null && (
-        <PhotoLightbox photos={photos} captions={captions} initialIndex={lightboxIndex} onClose={() => setLightboxIndex(null)} />
-      )}
       {avatarLightboxOpen && author?.avatar && (
         <ImageLightbox src={author.avatar} alt={author.name ?? ""} onClose={() => setAvatarLightboxOpen(false)} />
       )}
@@ -1727,20 +1733,20 @@ export default function PostCard({ post, author, likeCount, commentCount = 0, is
         )}
 
         {/* Photo grid */}
-        {post.mediaUrl && post.mediaType === "image" && photos.length > 0 && (
+        {!hideMedia && post.mediaUrl && post.mediaType === "image" && photos.length > 0 && (
           <div className="mb-4">
             {/* 3-photo layout: 1st full-width, 2nd & 3rd half-size below */}
             {photos.length === 3 ? (
               <div className="border border-border overflow-hidden relative">
                 {/* First photo — full width */}
                 <PostImageCell src={photos[0]} alt={altTexts[0] ?? captions[0] ?? "Photo 1"} tooltip={altTexts[0] ?? undefined}
-                  single={false} onClick={() => setLightboxIndex(0)} />
+                  single={false} onClick={() => openFocusedMedia(0)} />
                 {/* Second and third photos — half width each */}
                 <div className="grid grid-cols-2 gap-1 mt-1">
                   <PostImageCell src={photos[1]} alt={altTexts[1] ?? captions[1] ?? "Photo 2"} tooltip={altTexts[1] ?? undefined}
-                    single={false} onClick={() => setLightboxIndex(1)} />
+                    single={false} onClick={() => openFocusedMedia(1)} />
                   <PostImageCell src={photos[2]} alt={altTexts[2] ?? captions[2] ?? "Photo 3"} tooltip={altTexts[2] ?? undefined}
-                    single={false} onClick={() => setLightboxIndex(2)} />
+                    single={false} onClick={() => openFocusedMedia(2)} />
                 </div>
                 <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs font-semibold px-2 py-0.5 rounded-full pointer-events-none select-none">
                   1/3
@@ -1751,7 +1757,7 @@ export default function PostCard({ post, author, likeCount, commentCount = 0, is
               {photos.map((src, idx) => (
                 <PostImageCell key={idx} src={src} alt={altTexts[idx] ?? captions[idx] ?? `Photo ${idx + 1}`} tooltip={altTexts[idx] ?? undefined}
                   single={photos.length === 1}
-                  onClick={() => setLightboxIndex(idx)} />
+                  onClick={() => openFocusedMedia(idx)} />
               ))}
               {photos.length > 1 && (
                 <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs font-semibold px-2 py-0.5 rounded-full pointer-events-none select-none">
@@ -1804,8 +1810,8 @@ export default function PostCard({ post, author, likeCount, commentCount = 0, is
         )}
 
         {/* Video */}
-        {post.mediaUrl && post.mediaType === "video" && (
-          <VideoPlayer src={post.mediaUrl} poster={post.videoPosterUrl} />
+        {!hideMedia && post.mediaUrl && post.mediaType === "video" && (
+          <VideoPlayer src={post.mediaUrl} poster={post.videoPosterUrl} onOpen={() => openFocusedMedia(0)} />
         )}
 
         {/* Audio */}

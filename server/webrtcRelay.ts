@@ -13,6 +13,13 @@ const DEFAULT_STUN_SERVERS: WebRtcIceServer[] = [
 const safeUrl = (url: unknown): url is string =>
   typeof url === "string" && /^(stun|turn|turns):/i.test(url.trim());
 
+function hasTurnServer(iceServers: WebRtcIceServer[]): boolean {
+  return iceServers.some((server) => {
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    return urls.some((url) => /^turns?:/i.test(url));
+  });
+}
+
 function sanitiseIceServers(value: unknown): WebRtcIceServer[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) => {
@@ -28,17 +35,56 @@ function sanitiseIceServers(value: unknown): WebRtcIceServer[] {
   });
 }
 
+function cloudflareCredentialTtlSeconds(): number {
+  const configuredTtl = Number.parseInt(process.env.CLOUDFLARE_TURN_TTL_SECONDS ?? "", 10);
+  // Cloudflare supports credentials up to 48 hours. One hour is sufficient for
+  // FacingFace's existing 30-minute call limit and keeps credentials short-lived.
+  if (Number.isFinite(configuredTtl) && configuredTtl >= 1_800 && configuredTtl <= 172_800) {
+    return configuredTtl;
+  }
+  return 3_600;
+}
+
 export type WebRtcRelayConfig = {
   iceServers: WebRtcIceServer[];
   relayConfigured: boolean;
-  relayProvider: "metered" | "static" | "none";
+  relayProvider: "cloudflare" | "metered" | "static" | "none";
 };
 
 /**
  * Returns browser-safe ICE entries. Provider API keys stay on the server;
- * browsers receive only the short-lived or credential-scoped ICE result.
+ * browsers receive only temporary or credential-scoped ICE results.
  */
 export async function getWebRtcRelayConfig(): Promise<WebRtcRelayConfig> {
+  const cloudflareTurnKeyId = process.env.CLOUDFLARE_TURN_KEY_ID?.trim();
+  const cloudflareTurnApiToken = process.env.CLOUDFLARE_TURN_API_TOKEN?.trim();
+
+  if (cloudflareTurnKeyId && cloudflareTurnApiToken) {
+    try {
+      const response = await fetch(
+        `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(cloudflareTurnKeyId)}/credentials/generate-ice-servers`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${cloudflareTurnApiToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ ttl: cloudflareCredentialTtlSeconds() }),
+          signal: AbortSignal.timeout(8_000),
+        },
+      );
+      if (response.ok) {
+        const payload = await response.json() as { iceServers?: unknown };
+        const iceServers = sanitiseIceServers(payload.iceServers);
+        if (hasTurnServer(iceServers)) {
+          return { iceServers, relayConfigured: true, relayProvider: "cloudflare" };
+        }
+      }
+    } catch {
+      // Keep call setup available with STUN fallback if the provider is briefly unavailable.
+    }
+  }
+
   const rawMeteredAppName = process.env.METERED_TURN_APP_NAME?.trim();
   // Metered app names are DNS labels. Reject anything else rather than using
   // a malformed environment value to construct an outbound request.
@@ -55,7 +101,7 @@ export async function getWebRtcRelayConfig(): Promise<WebRtcRelayConfig> {
       const response = await fetch(endpoint, { signal: AbortSignal.timeout(8_000) });
       if (response.ok) {
         const iceServers = sanitiseIceServers(await response.json());
-        if (iceServers.some((server) => JSON.stringify(server.urls).includes("turn"))) {
+        if (hasTurnServer(iceServers)) {
           return { iceServers, relayConfigured: true, relayProvider: "metered" };
         }
       }

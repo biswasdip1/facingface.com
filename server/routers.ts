@@ -583,11 +583,15 @@ const postsRouter = router({
       const author = await getUserById(post.authorId);
       const resharedPost = post.resharedFromId ? await getPostForViewer(post.resharedFromId, ctx.user?.id) : null;
       const resharedAuthor = resharedPost ? await getUserById(resharedPost.authorId) : null;
-      const [likeCounts] = await Promise.all([getLikeCounts([post.id], "post")]);
+      const [likeCounts, commentCounts] = await Promise.all([
+        getLikeCounts([post.id], "post"),
+        getCommentCounts([post.id]),
+      ]);
       return {
         post,
         author: author ? { id: author.id, name: author.name, avatar: author.avatar ?? null, isVerified: author.isVerified ?? false } : null,
         likeCount: likeCounts[post.id] ?? 0,
+        commentCount: commentCounts[post.id] ?? 0,
         resharedPost: resharedPost ?? null,
         resharedAuthor: resharedAuthor ? { id: resharedAuthor.id, name: resharedAuthor.name, avatar: resharedAuthor.avatar ?? null, isVerified: resharedAuthor.isVerified ?? false } : null,
       };

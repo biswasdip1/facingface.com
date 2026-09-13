@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getWebRtcRelayConfig } from "./webrtcRelay";
 
 const ENV_KEYS = [
+  "CLOUDFLARE_TURN_KEY_ID",
+  "CLOUDFLARE_TURN_API_TOKEN",
+  "CLOUDFLARE_TURN_TTL_SECONDS",
   "METERED_TURN_APP_NAME",
   "METERED_TURN_API_KEY",
   "METERED_TURN_REGION",
@@ -24,6 +27,7 @@ afterEach(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   });
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -35,6 +39,61 @@ describe("getWebRtcRelayConfig", () => {
     expect(config.iceServers).toEqual(expect.arrayContaining([
       expect.objectContaining({ urls: "stun:stun.l.google.com:19302" }),
     ]));
+  });
+
+  it("generates temporary Cloudflare browser ICE entries from server-only credentials", async () => {
+    process.env.CLOUDFLARE_TURN_KEY_ID = "turn-key-id";
+    process.env.CLOUDFLARE_TURN_API_TOKEN = "server-only-cloudflare-token";
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      iceServers: [
+        { urls: ["stun:stun.cloudflare.com:3478"] },
+        {
+          urls: ["turn:turn.cloudflare.com:3478?transport=udp", "turns:turn.cloudflare.com:443?transport=tcp"],
+          username: "temporary-user",
+          credential: "temporary-password",
+        },
+        { urls: "https://unsafe.example.test/credential" },
+      ],
+    }), { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const config = await getWebRtcRelayConfig();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://rtc.live.cloudflare.com/v1/turn/keys/turn-key-id/credentials/generate-ice-servers",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ Authorization: "Bearer server-only-cloudflare-token" }),
+        body: JSON.stringify({ ttl: 3600 }),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(config).toMatchObject({ relayConfigured: true, relayProvider: "cloudflare" });
+    expect(config.iceServers).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        urls: ["turn:turn.cloudflare.com:3478?transport=udp", "turns:turn.cloudflare.com:443?transport=tcp"],
+        username: "temporary-user",
+        credential: "temporary-password",
+      }),
+    ]));
+    expect(JSON.stringify(config.iceServers)).not.toContain("https://unsafe.example.test");
+  });
+
+  it("uses the configured Cloudflare TTL only within the provider's permitted range", async () => {
+    process.env.CLOUDFLARE_TURN_KEY_ID = "turn-key-id";
+    process.env.CLOUDFLARE_TURN_API_TOKEN = "server-only-cloudflare-token";
+    process.env.CLOUDFLARE_TURN_TTL_SECONDS = "7200";
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      iceServers: [{ urls: "turn:turn.cloudflare.com:3478", username: "user", credential: "credential" }],
+    }), { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getWebRtcRelayConfig();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ body: JSON.stringify({ ttl: 7200 }) }),
+    );
   });
 
   it("returns static TURN settings only when credentials and a TURN URL are supplied", async () => {
@@ -83,7 +142,7 @@ describe("getWebRtcRelayConfig", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       expect.objectContaining({ href: expect.stringContaining("https://facingface.metered.live/api/v1/turn/credentials?apiKey=server-only-api-key&region=global") }),
-      expect.objectContaining({ signal: expect.any(AbortSignal) })
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(config).toMatchObject({ relayConfigured: true, relayProvider: "metered" });
     expect(config.iceServers).toEqual(expect.arrayContaining([
