@@ -732,7 +732,7 @@ export default function Profile() {
                 )}
               </div>
               {isOwnProfile && (
-                <section className="mt-16 min-w-0 flex-1 rounded-xl border px-3 py-2.5 shadow-sm sm:px-4" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }} aria-label="Profile Viewers">
+                <section className="mt-16 min-w-0 flex-1 rounded-xl px-3 py-2.5 shadow-sm sm:px-4" style={{ backgroundColor: "var(--its-surface)" }} aria-label="Profile Viewers">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-2">
                       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full shadow-sm" style={{ backgroundColor: "var(--its-surface-alt)", color: "var(--its-text-primary)" }}><Eye className="h-3.5 w-3.5" /></span>
