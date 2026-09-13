@@ -165,12 +165,13 @@ function FocusedMediaPostView({
   const nextPhoto = () => onSelectPhoto((photoIndex + 1) % photos.length);
 
   return (
-    <main className="min-h-screen pt-16 bg-black" aria-label="Focused media post">
+    <main className="min-h-screen pt-16" style={{ backgroundColor: "var(--its-surface-alt)" }} aria-label="Focused media post">
       <div className="fixed top-20 left-3 z-50">
         <button
           type="button"
           onClick={onClose}
-          className="inline-flex items-center gap-2 rounded-full bg-black/70 px-3 py-2 text-sm font-semibold text-white shadow-lg transition-colors hover:bg-black focus:outline-none focus:ring-2 focus:ring-white"
+          className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-semibold shadow-lg transition-colors hover:brightness-110 focus:outline-none focus:ring-2"
+          style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)", color: "var(--its-text-primary)", outlineColor: "var(--its-border)" }}
           aria-label="Close focused post view"
         >
           <X size={18} />
@@ -178,15 +179,16 @@ function FocusedMediaPostView({
         </button>
       </div>
 
-      <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-[1600px] flex-col bg-black lg:flex-row">
-        <section className="relative flex min-h-[48vh] flex-1 items-center justify-center overflow-hidden bg-black px-3 pb-4 pt-14 lg:min-h-[calc(100vh-4rem)] lg:px-8 lg:py-10">
+      <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-[1600px] flex-col lg:flex-row" style={{ backgroundColor: "var(--its-surface-alt)" }}>
+        <section className="relative flex min-h-[48vh] flex-1 items-center justify-center overflow-hidden px-3 pb-4 pt-14 lg:min-h-[calc(100vh-4rem)] lg:px-8 lg:py-10" style={{ backgroundColor: "var(--its-surface-alt)" }}>
           {isPhotoPost && (
             <div className="absolute right-3 top-3 z-20 flex items-center gap-2 sm:right-5 sm:top-5">
               <div className="relative">
                 <button
                   type="button"
                   onClick={() => setShowTags((current) => !current)}
-                  className={`flex h-10 w-10 items-center justify-center rounded-full border text-white shadow-lg transition-colors focus:outline-none focus:ring-2 focus:ring-white ${showTags ? "border-white bg-white/25" : "border-white/30 bg-black/70 hover:bg-black"}`}
+                  className="flex h-10 w-10 items-center justify-center rounded-full border shadow-lg transition-colors hover:brightness-110 focus:outline-none focus:ring-2"
+                  style={{ backgroundColor: showTags ? "var(--its-surface-hover)" : "var(--its-surface)", borderColor: "var(--its-border)", color: "var(--its-text-primary)", outlineColor: "var(--its-border)" }}
                   aria-label="View people tagged in this post"
                   aria-expanded={showTags}
                   title="Tagged people"
@@ -194,28 +196,29 @@ function FocusedMediaPostView({
                   <Tag size={19} />
                 </button>
                 {showTags && (
-                  <div className="absolute right-0 top-12 w-60 rounded-lg border border-white/15 bg-black/90 p-3 text-sm text-white shadow-2xl">
-                    <p className="mb-2 text-xs font-bold uppercase tracking-wide text-white/70">Tagged people</p>
+                  <div className="absolute right-0 top-12 w-60 rounded-lg border p-3 text-sm shadow-2xl" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)", color: "var(--its-text-primary)" }}>
+                    <p className="mb-2 text-xs font-bold uppercase tracking-wide" style={{ color: "var(--its-text-muted)" }}>Tagged people</p>
                     {taggedPeople.length > 0 ? (
                       <div className="space-y-1">
                         {taggedPeople.map((person) => (
-                          <Link key={person.id} href={`/profile/${person.id}`} className="block rounded px-2 py-1.5 font-semibold text-white no-underline transition-colors hover:bg-white/15 hover:underline">
+                          <Link key={person.id} href={`/profile/${person.id}`} className="block rounded px-2 py-1.5 font-semibold no-underline transition-colors hover:brightness-110 hover:underline" style={{ color: "var(--its-text-primary)" }}>
                             {person.name}
                           </Link>
                         ))}
                       </div>
                     ) : (
-                      <p className="text-xs leading-relaxed text-white/75">No people have been tagged in this post.</p>
+                      <p className="text-xs leading-relaxed" style={{ color: "var(--its-text-secondary)" }}>No people have been tagged in this post.</p>
                     )}
                   </div>
                 )}
               </div>
-              <div className="flex overflow-hidden rounded-full border border-white/30 bg-black/70 shadow-lg">
+              <div className="flex overflow-hidden rounded-full border shadow-lg" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }}>
                 <button
                   type="button"
                   onClick={() => setZoom((current) => Math.max(1, Number((current - 0.25).toFixed(2))))}
                   disabled={zoom <= 1}
-                  className="flex h-10 w-10 items-center justify-center text-white transition-colors hover:bg-black disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white"
+                  className="flex h-10 w-10 items-center justify-center transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-inset"
+                  style={{ color: "var(--its-text-primary)", outlineColor: "var(--its-border)" }}
                   aria-label="Zoom out"
                   title="Zoom out"
                 >
@@ -225,7 +228,8 @@ function FocusedMediaPostView({
                   type="button"
                   onClick={() => setZoom((current) => Math.min(3, Number((current + 0.25).toFixed(2))))}
                   disabled={zoom >= 3}
-                  className="flex h-10 w-10 items-center justify-center border-l border-white/20 text-white transition-colors hover:bg-black disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white"
+                  className="flex h-10 w-10 items-center justify-center border-l transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-inset"
+                  style={{ borderColor: "var(--its-border)", color: "var(--its-text-primary)", outlineColor: "var(--its-border)" }}
                   aria-label="Zoom in"
                   title="Zoom in"
                 >
@@ -235,7 +239,8 @@ function FocusedMediaPostView({
                   type="button"
                   onClick={() => setZoom(1)}
                   disabled={zoom === 1}
-                  className="flex h-10 w-10 items-center justify-center border-l border-white/20 text-white transition-colors hover:bg-black disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white"
+                  className="flex h-10 w-10 items-center justify-center border-l transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-inset"
+                  style={{ borderColor: "var(--its-border)", color: "var(--its-text-primary)", outlineColor: "var(--its-border)" }}
                   aria-label="Reset photo zoom"
                   title="Reset zoom"
                 >
@@ -258,7 +263,8 @@ function FocusedMediaPostView({
                   <button
                     type="button"
                     onClick={previousPhoto}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-black/65 p-3 text-white transition-colors hover:bg-black focus:outline-none focus:ring-2 focus:ring-white"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full border p-3 shadow-lg transition-colors hover:brightness-110 focus:outline-none focus:ring-2"
+                    style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)", color: "var(--its-text-primary)", outlineColor: "var(--its-border)" }}
                     aria-label="Previous photo"
                   >
                     <ChevronLeft size={24} />
@@ -266,18 +272,19 @@ function FocusedMediaPostView({
                   <button
                     type="button"
                     onClick={nextPhoto}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-black/65 p-3 text-white transition-colors hover:bg-black focus:outline-none focus:ring-2 focus:ring-white"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full border p-3 shadow-lg transition-colors hover:brightness-110 focus:outline-none focus:ring-2"
+                    style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)", color: "var(--its-text-primary)", outlineColor: "var(--its-border)" }}
                     aria-label="Next photo"
                   >
                     <ChevronRight size={24} />
                   </button>
-                  <div className="absolute bottom-4 rounded-full bg-black/70 px-3 py-1 text-xs font-semibold text-white">
+                  <div className="absolute bottom-4 rounded-full border px-3 py-1 text-xs font-semibold shadow-lg" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)", color: "var(--its-text-primary)" }}>
                     {photoIndex + 1} / {photos.length}
                   </div>
                 </>
               )}
               {captions[photoIndex] && (
-                <p className="absolute bottom-5 left-1/2 max-w-[85%] -translate-x-1/2 rounded bg-black/65 px-3 py-2 text-center text-sm text-white">
+                <p className="absolute bottom-5 left-1/2 max-w-[85%] -translate-x-1/2 rounded border px-3 py-2 text-center text-sm shadow-lg" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)", color: "var(--its-text-primary)" }}>
                   {captions[photoIndex]}
                 </p>
               )}
@@ -290,12 +297,12 @@ function FocusedMediaPostView({
               autoPlay
               playsInline
               className="max-h-[64vh] max-w-full shadow-2xl lg:max-h-[calc(100vh-9rem)]"
-              style={{ background: "#000" }}
+              style={{ backgroundColor: "var(--its-surface-alt)" }}
             />
           )}
         </section>
 
-        <aside className="w-full bg-background text-foreground lg:w-[460px] lg:max-h-[calc(100vh-4rem)] lg:overflow-y-auto">
+        <aside className="w-full lg:w-[460px] lg:max-h-[calc(100vh-4rem)] lg:overflow-y-auto" style={{ backgroundColor: "var(--its-surface)", color: "var(--its-text-primary)", borderColor: "var(--its-border)" }}>
           <div className="px-4 py-2 sm:px-5">
             <PostCard
               post={post}
