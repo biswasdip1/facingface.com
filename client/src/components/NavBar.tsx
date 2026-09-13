@@ -955,6 +955,13 @@ export default function NavBar() {
                 <Link
                   href={href}
                   onClick={(e) => {
+                    // Desktop Messages opens the compact chat tray, like a social inbox.
+                    // The full /messages page remains available from the tray and on mobile.
+                    if (label === "Messages" && window.innerWidth >= 768 && !location.startsWith("/messages")) {
+                      e.preventDefault();
+                      window.dispatchEvent(new CustomEvent("facingface:toggle-chat-tray"));
+                      return;
+                    }
                     // If clicking HOME and already on home page, scroll to top
                     if (label === "Home" && location === "/") {
                       e.preventDefault();
@@ -967,7 +974,7 @@ export default function NavBar() {
                     color: isSuperAdminItem ? "#b45309" : isActive ? "var(--its-text-primary)" : "var(--its-text-muted)",
                     borderBottom: isActive ? `2px solid ${isSuperAdminItem ? "#d97706" : "var(--its-text-primary)"}` : "2px solid transparent",
                     backgroundColor: isSuperAdminItem ? "rgba(245, 158, 11, 0.1)" : "transparent",
-                    cursor: label === "Home" && isActive ? "pointer" : "default",
+                    cursor: (label === "Home" && isActive) || label === "Messages" ? "pointer" : "default",
                   }}
                 >
                   <span className="relative">

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { MessageCircle, Minus, Phone, Send, Smile, Video, X } from "lucide-react";
+import { MessageCircle, Minus, Phone, Search, Send, Smile, Video, X } from "lucide-react";
 import CallModal from "@/components/CallModal";
 
 type Peer = {
@@ -225,6 +225,8 @@ function FloatingConversation({
 export default function FloatingChatManager() {
   const { user } = useAuth();
   const [trayOpen, setTrayOpen] = useState(false);
+  const [chatSearch, setChatSearch] = useState("");
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const [windows, setWindows] = useState<ChatWindowState[]>([]);
   const [outgoingCall, setOutgoingCall] = useState<OutgoingCall | null>(null);
   const utils = trpc.useUtils();
@@ -234,9 +236,18 @@ export default function FloatingChatManager() {
   });
 
   const recentConversations = useMemo(
-    () => conversations.filter((conversation: any) => conversation.otherUser?.id).slice(0, 8),
+    () => conversations.filter((conversation: any) => conversation.otherUser?.id).slice(0, 30),
     [conversations]
   );
+  const visibleConversations = useMemo(() => {
+    const query = chatSearch.trim().toLowerCase();
+    return recentConversations.filter((conversation: any) => {
+      const name = String(conversation.otherUser?.name ?? "").toLowerCase();
+      const matchesSearch = !query || name.includes(query);
+      const matchesUnread = !unreadOnly || (conversation.unreadCount ?? 0) > 0;
+      return matchesSearch && matchesUnread;
+    });
+  }, [chatSearch, recentConversations, unreadOnly]);
   const totalUnread = useMemo(
     () => conversations.reduce((total: number, conversation: any) => total + (conversation.unreadCount ?? 0), 0),
     [conversations]
@@ -269,6 +280,17 @@ export default function FloatingChatManager() {
   }, [conversations]);
 
   useEffect(() => {
+    const toggleTray = () => setTrayOpen((open) => !open);
+    const openTray = () => setTrayOpen(true);
+    window.addEventListener("facingface:toggle-chat-tray", toggleTray);
+    window.addEventListener("facingface:open-chat-tray", openTray);
+    return () => {
+      window.removeEventListener("facingface:toggle-chat-tray", toggleTray);
+      window.removeEventListener("facingface:open-chat-tray", openTray);
+    };
+  }, []);
+
+  useEffect(() => {
     const handleRefresh = (event: Event) => {
       const conversationId = (event as CustomEvent<{ conversationId?: number }>).detail?.conversationId;
       if (!Number.isInteger(conversationId) || !conversationId || conversationId <= 0) return;
@@ -293,20 +315,36 @@ export default function FloatingChatManager() {
         />
       )}
       {trayOpen && (
-        <aside className="fixed bottom-16 right-4 z-[65] w-80 overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
-          <div className="flex items-center justify-between border-b border-border px-4 py-3">
-            <div>
-              <p className="font-black">Chats</p>
-              <p className="text-xs text-muted-foreground">Recent direct messages</p>
+        <aside className="fixed right-4 top-[4.75rem] z-[65] flex h-[min(680px,calc(100dvh-5.75rem))] w-[min(380px,calc(100vw-24px))] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl" aria-label="Recent chats">
+          <div className="border-b border-border px-4 pb-3 pt-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"><MessageCircle className="h-5 w-5" /></span>
+                <div className="min-w-0">
+                  <p className="truncate text-xl font-black">Chats</p>
+                  <p className="text-xs text-muted-foreground">Recent direct messages</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setTrayOpen(false)} className="rounded-full p-2 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Close chats">
+                <X className="h-5 w-5" />
+              </button>
             </div>
-            <button type="button" onClick={() => setTrayOpen(false)} className="rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Close chats">
-              <X className="h-4 w-4" />
-            </button>
+            <label className="mt-3 flex items-center gap-2 rounded-full bg-muted px-3 py-2.5 focus-within:ring-2 focus-within:ring-ring/40">
+              <Search className="h-4 w-4 text-muted-foreground" />
+              <input value={chatSearch} onChange={(event) => setChatSearch(event.target.value)} placeholder="Search Messenger" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" aria-label="Search chats" />
+              {chatSearch && <button type="button" onClick={() => setChatSearch("")} className="rounded-full p-0.5 text-muted-foreground hover:bg-background" aria-label="Clear chat search"><X className="h-3.5 w-3.5" /></button>}
+            </label>
+            <div className="mt-3 flex items-center gap-2">
+              <button type="button" onClick={() => setUnreadOnly(false)} className={`rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${!unreadOnly ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/70"}`}>All</button>
+              <button type="button" onClick={() => setUnreadOnly(true)} className={`rounded-full px-3 py-1.5 text-xs font-bold transition-colors ${unreadOnly ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/70"}`}>Unread{totalUnread > 0 ? ` (${totalUnread})` : ""}</button>
+            </div>
           </div>
-          <div className="max-h-96 overflow-y-auto p-2">
+          <div className="min-h-0 flex-1 overflow-y-auto p-2">
             {recentConversations.length === 0 ? (
               <p className="px-3 py-8 text-center text-sm text-muted-foreground">No direct conversations yet. Open a friend’s profile and select Message.</p>
-            ) : recentConversations.map((conversation: any) => {
+            ) : visibleConversations.length === 0 ? (
+              <p className="px-3 py-8 text-center text-sm text-muted-foreground">No chats match this view.</p>
+            ) : visibleConversations.map((conversation: any) => {
               const peer: Peer = {
                 id: conversation.otherUser.id,
                 name: conversation.otherUser.name ?? "Conversation",
@@ -317,9 +355,10 @@ export default function FloatingChatManager() {
                   key={conversation.id}
                   type="button"
                   onClick={() => openConversation({ conversationId: conversation.id, peer })}
-                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-muted"
+                  className="flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors hover:bg-muted"
+                  aria-label={`Open chat with ${peer.name}`}
                 >
-                  <Avatar className="h-10 w-10 border border-border">
+                  <Avatar className="h-11 w-11 border border-border">
                     <AvatarImage src={peer.avatar ?? undefined} />
                     <AvatarFallback className="text-xs font-bold">{initials(peer.name)}</AvatarFallback>
                   </Avatar>
@@ -331,6 +370,9 @@ export default function FloatingChatManager() {
                 </button>
               );
             })}
+          </div>
+          <div className="border-t border-border p-2">
+            <button type="button" onClick={() => { setTrayOpen(false); window.location.assign("/messages"); }} className="w-full rounded-xl px-3 py-2.5 text-sm font-bold text-primary transition-colors hover:bg-muted">Open full Messenger</button>
           </div>
         </aside>
       )}
