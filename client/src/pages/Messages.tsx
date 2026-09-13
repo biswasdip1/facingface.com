@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -82,7 +82,8 @@ function highlightText(text: string, query: string) {
 
 export default function Messages() {
   const { user } = useAuth();
-  const [location, navigate] = useLocation();
+  const [, navigate] = useLocation();
+  const search = useSearch();
   const [activeConvId, setActiveConvId] = useState<number | null>(null);
   const [sidebarTab, setSidebarTab] = useState<"dms" | "groups">("dms");
   const [activeGroupId, setActiveGroupId] = useState<number | null>(null);
@@ -240,9 +241,9 @@ export default function Messages() {
     return () => clearInterval(interval);
   }, []);
 
-  // Handle ?conv=ID&msg=TEXT URL params
+  // Handle ?conv=ID&msg=TEXT URL params. useSearch reacts to same-route query changes.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(search);
     const convParam = params.get("conv");
     const msgParam = params.get("msg");
     if (convParam) {
@@ -250,7 +251,7 @@ export default function Messages() {
       if (!isNaN(convId)) setActiveConvId(convId);
     }
     if (msgParam) setText(decodeURIComponent(msgParam));
-  }, [location]);
+  }, [search]);
 
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -838,6 +839,8 @@ export default function Messages() {
                 <button
                   key={conv.id}
                   onClick={() => navigate(`/messages?conv=${conv.id}`)}
+                  aria-label={`Open conversation with ${other?.name ?? "this person"}`}
+                  title={`Open conversation with ${other?.name ?? "this person"}`}
                   className={cn(
                     "w-full flex items-center gap-3 px-4 py-3.5 transition-colors text-left relative",
                     isActive

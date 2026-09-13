@@ -44,7 +44,7 @@ function ComposerAvatar({ src, name, size = 10 }: { src?: string | null; name?: 
 }
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Image, Video, X, Loader2, Link2, BarChart2, Plus, Trash2, Smile, Radio, FileText, Music, Film, MapPin, Tag, UserPlus, ChevronDown } from "lucide-react";
+import { Image, Video, X, Loader2, Link2, BarChart2, Plus, Trash2, Smile, Radio, FileText, Music, Film, Globe2, Lock, MapPin, Tag, UserPlus, ChevronDown } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { toast } from "sonner";
 import Picker from "@emoji-mart/react";
@@ -996,17 +996,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
                 </p>
               </div>
             </div>
-            {!isContextPost && (
-              <select
-                aria-label="Post audience"
-                value={audience}
-                onChange={(event) => setAudience(event.target.value as "public" | "private")}
-                className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-semibold text-foreground outline-none transition-colors hover:border-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="public">Public</option>
-                <option value="private">Private</option>
-              </select>
-            )}
+
           </div>
 
           {/* Modal body */}
@@ -1077,7 +1067,11 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
             <ChevronDown size={15} className={showAddToPost ? "rotate-180 transition-transform" : "transition-transform"} />
           </button>
           {showAddToPost && (
-            <div className="absolute right-0 top-7 z-40 w-44 rounded-lg border border-border bg-popover p-1.5 shadow-xl" role="menu" aria-label="More post options">
+            <div className="absolute right-0 top-7 z-40 w-52 rounded-lg border border-border bg-popover p-1.5 shadow-xl" role="menu" aria-label="More post options">
+              <p className="px-2.5 pb-1 pt-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Post audience</p>
+              <button type="button" role="menuitem" onClick={() => { setAudience("public"); setShowAddToPost(false); }} className={`inline-flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-semibold transition-colors ${audience === "public" ? "bg-blue-500/10 text-blue-700" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}><Globe2 size={16} />Public{audience === "public" && <span className="ml-auto text-[10px]">✓</span>}</button>
+              <button type="button" role="menuitem" onClick={() => { setAudience("private"); setShowAddToPost(false); }} className={`inline-flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-semibold transition-colors ${audience === "private" ? "bg-amber-500/10 text-amber-700" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}><Lock size={16} />Private{audience === "private" && <span className="ml-auto text-[10px]">✓</span>}</button>
+              <div className="mx-2 my-1 border-t border-border" />
               <button type="button" role="menuitem" onClick={() => { setActivePostExtra("tag"); setShowAddToPost(false); }} className={`inline-flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-semibold transition-colors ${taggedFriendIds.length > 0 ? "bg-blue-500/10 text-blue-700" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}><UserPlus size={16} />Tag</button>
               <button type="button" role="menuitem" onClick={() => { setActivePostExtra("feeling"); setShowAddToPost(false); }} className={`inline-flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-semibold transition-colors ${feeling ? "bg-amber-500/10 text-amber-700" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}><Smile size={16} />Feeling</button>
               <button type="button" role="menuitem" onClick={() => { setActivePostExtra("checkin"); setShowAddToPost(false); }} className={`inline-flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-semibold transition-colors ${checkInLocation.trim() ? "bg-rose-500/10 text-rose-700" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}><MapPin size={16} />Check in</button>
