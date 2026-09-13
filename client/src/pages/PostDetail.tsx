@@ -1,10 +1,10 @@
-import { useParams, useLocation } from "wouter";
+import { Link, useParams, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import PostCard from "@/components/PostCard";
 import CommentSection from "@/components/CommentSection";
-import { ArrowLeft, AlertCircle, ChevronLeft, ChevronRight, X } from "lucide-react";
-import { useMemo } from "react";
+import { ArrowLeft, AlertCircle, ChevronLeft, ChevronRight, RotateCcw, Tag, X, ZoomIn, ZoomOut } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 type FocusedMediaData = {
   author: Parameters<typeof PostCard>[0]["author"] | null;
@@ -12,6 +12,23 @@ type FocusedMediaData = {
   commentCount: number;
   resharedAuthor: Parameters<typeof PostCard>[0]["resharedAuthor"];
 };
+
+type TaggedPerson = { id: number; name: string };
+
+function parseTaggedPeople(value: string | null | undefined): TaggedPerson[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((person): person is TaggedPerson => (
+      typeof person === "object" && person !== null &&
+      typeof (person as TaggedPerson).id === "number" &&
+      typeof (person as TaggedPerson).name === "string"
+    ));
+  } catch {
+    return [];
+  }
+}
 
 export default function PostDetail() {
   const params = useParams<{ id: string }>();
@@ -144,6 +161,13 @@ function FocusedMediaPostView({
   const photoIndex = Math.min(Math.max(0, requestedMediaIndex), Math.max(0, photos.length - 1));
   const currentPhoto = photos[photoIndex];
   const isPhotoPost = post.mediaType === "image" && Boolean(currentPhoto);
+  const taggedPeople = parseTaggedPeople(post.taggedPeople);
+  const [zoom, setZoom] = useState(1);
+  const [showTags, setShowTags] = useState(false);
+
+  useEffect(() => {
+    setZoom(1);
+  }, [currentPhoto]);
 
   const previousPhoto = () => onSelectPhoto((photoIndex - 1 + photos.length) % photos.length);
   const nextPhoto = () => onSelectPhoto((photoIndex + 1) % photos.length);
@@ -163,13 +187,79 @@ function FocusedMediaPostView({
       </div>
 
       <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-[1600px] flex-col bg-black lg:flex-row">
-        <section className="relative flex min-h-[48vh] flex-1 items-center justify-center bg-black px-3 pb-4 pt-14 lg:min-h-[calc(100vh-4rem)] lg:px-8 lg:py-10">
+        <section className="relative flex min-h-[48vh] flex-1 items-center justify-center overflow-hidden bg-black px-3 pb-4 pt-14 lg:min-h-[calc(100vh-4rem)] lg:px-8 lg:py-10">
+          {isPhotoPost && (
+            <div className="absolute right-3 top-3 z-20 flex items-center gap-2 sm:right-5 sm:top-5">
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowTags((current) => !current)}
+                  className={`flex h-10 w-10 items-center justify-center rounded-full border text-white shadow-lg transition-colors focus:outline-none focus:ring-2 focus:ring-white ${showTags ? "border-white bg-white/25" : "border-white/30 bg-black/70 hover:bg-black"}`}
+                  aria-label="View people tagged in this post"
+                  aria-expanded={showTags}
+                  title="Tagged people"
+                >
+                  <Tag size={19} />
+                </button>
+                {showTags && (
+                  <div className="absolute right-0 top-12 w-60 rounded-lg border border-white/15 bg-black/90 p-3 text-sm text-white shadow-2xl">
+                    <p className="mb-2 text-xs font-bold uppercase tracking-wide text-white/70">Tagged people</p>
+                    {taggedPeople.length > 0 ? (
+                      <div className="space-y-1">
+                        {taggedPeople.map((person) => (
+                          <Link key={person.id} href={`/profile/${person.id}`} className="block rounded px-2 py-1.5 font-semibold text-white no-underline transition-colors hover:bg-white/15 hover:underline">
+                            {person.name}
+                          </Link>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs leading-relaxed text-white/75">No people have been tagged in this post.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="flex overflow-hidden rounded-full border border-white/30 bg-black/70 shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => setZoom((current) => Math.max(1, Number((current - 0.25).toFixed(2))))}
+                  disabled={zoom <= 1}
+                  className="flex h-10 w-10 items-center justify-center text-white transition-colors hover:bg-black disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white"
+                  aria-label="Zoom out"
+                  title="Zoom out"
+                >
+                  <ZoomOut size={19} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setZoom((current) => Math.min(3, Number((current + 0.25).toFixed(2))))}
+                  disabled={zoom >= 3}
+                  className="flex h-10 w-10 items-center justify-center border-l border-white/20 text-white transition-colors hover:bg-black disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white"
+                  aria-label="Zoom in"
+                  title="Zoom in"
+                >
+                  <ZoomIn size={19} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setZoom(1)}
+                  disabled={zoom === 1}
+                  className="flex h-10 w-10 items-center justify-center border-l border-white/20 text-white transition-colors hover:bg-black disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white"
+                  aria-label="Reset photo zoom"
+                  title="Reset zoom"
+                >
+                  <RotateCcw size={17} />
+                </button>
+              </div>
+              <span className="sr-only" aria-live="polite">Photo zoom {Math.round(zoom * 100)} percent</span>
+            </div>
+          )}
           {isPhotoPost ? (
             <>
               <img
                 src={currentPhoto}
                 alt={altTexts[photoIndex] ?? captions[photoIndex] ?? `Photo ${photoIndex + 1}`}
                 className="max-h-[64vh] max-w-full select-none object-contain shadow-2xl lg:max-h-[calc(100vh-9rem)]"
+                style={{ transform: `scale(${zoom})`, transition: "transform 180ms cubic-bezier(0.23, 1, 0.32, 1)" }}
               />
               {photos.length > 1 && (
                 <>

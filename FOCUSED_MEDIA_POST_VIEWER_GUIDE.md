@@ -4,7 +4,7 @@
 
 When a member clicks a photo or video published on the FacingFace wall, the item now opens as a **focused post view** instead of a media-only black screen.
 
-The new view uses a Facebook-style layout. The selected photo or video appears large on the left, while the complete post appears on the right on desktop screens. The right panel keeps the existing post author, privacy label, tagged people, feeling, check-in, written post text, reactions, comments, replies, reshare controls, sharing, and save controls. On a phone, the layout stacks naturally with the media first and the complete discussion below it.
+The new view uses a Facebook-style layout. The selected photo or video appears large on the left, while the complete post appears on the right on desktop screens. A compact photo toolbar provides zoom in, zoom out, reset, and tagged-people controls. The right panel keeps the existing post author, privacy label, tagged people, feeling, check-in, written post text, reactions, comments, replies, reshare controls, sharing, and save controls. On a phone, the layout stacks naturally with the media first and the complete discussion below it.
 
 | Existing wall action | New result |
 |---|---|
@@ -12,6 +12,8 @@ The new view uses a Facebook-style layout. The selected photo or video appears l
 | Click a multi-photo post | Opens the selected photo and provides previous/next navigation. |
 | Click a published video | Opens the same focused post view with the video player and full discussion. |
 | Click Close | Returns to the normal post page. |
+| Click the magnifying-glass **+** or **−** buttons | Enlarges or reduces the selected photo in 25% steps; the circular reset button returns it to normal size. |
+| Click the **Tag** icon | Opens the people already tagged on that post, with a direct link to each person’s profile. It displays a clear message when no one has been tagged. |
 | Use reactions, comments, tags, share, reshare, or save | Uses the existing FacingFace controls and storage; no social data is reset or replaced. |
 
 ## What remains unchanged
