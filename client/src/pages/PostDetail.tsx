@@ -1,4 +1,4 @@
-import { Link, useParams, useLocation } from "wouter";
+import { Link, useParams, useLocation, useSearch } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import PostCard from "@/components/PostCard";
@@ -32,7 +32,8 @@ function parseTaggedPeople(value: string | null | undefined): TaggedPerson[] {
 
 export default function PostDetail() {
   const params = useParams<{ id: string }>();
-  const [location, navigate] = useLocation();
+  const [, navigate] = useLocation();
+  const search = useSearch();
   const { user } = useAuth();
   const postId = Number(params.id);
 
@@ -44,11 +45,10 @@ export default function PostDetail() {
   // A media query is added only when a photo/video on the wall is clicked.
   // The ordinary /post/:id link remains a conventional post detail page.
   const requestedMediaIndex = useMemo(() => {
-    const query = location.split("?")[1] ?? "";
-    const value = new URLSearchParams(query).get("media");
+    const value = new URLSearchParams(search).get("media");
     if (value === null || !/^\d+$/.test(value)) return null;
     return Number(value);
-  }, [location]);
+  }, [search]);
 
   const postIds = useMemo(() => (data?.post ? [data.post.id] : []), [data?.post?.id]);
   const { data: likedIds } = trpc.posts.getLikedPostIds.useQuery(
@@ -117,19 +117,11 @@ export default function PostDetail() {
           commentCount={commentCount}
           isLiked={isLiked}
           onDelete={() => navigate("/")}
+          initialCommentsOpen
           resharedPost={typedResharedPost}
           resharedAuthor={resharedAuthor}
         />
 
-        <div
-          className="mt-4 rounded-xl border p-4"
-          style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }}
-        >
-          <h2 className="font-bold text-sm mb-4" style={{ color: "var(--its-text-primary)" }}>
-            Comments
-          </h2>
-          <CommentSection postId={post.id} />
-        </div>
       </div>
     </div>
   );
