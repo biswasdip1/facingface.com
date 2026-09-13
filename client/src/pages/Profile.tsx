@@ -669,9 +669,9 @@ export default function Profile() {
           {/* Avatar + info */}
           <div className="px-5 pb-6 sm:px-7 sm:pb-7">
             {/* Avatar row — overlaps cover photo with negative margin */}
-            <div className="-mt-16 mb-3">
+            <div className="-mt-16 mb-3 flex items-start gap-3 sm:gap-4">
               {/* Avatar — with gradient story ring when user has active stories */}
-              <div className="relative inline-block">
+              <div className="relative inline-block shrink-0">
                 {/* Story ring */}
                 {hasActiveStory && (
                   <div
@@ -731,6 +731,32 @@ export default function Profile() {
                   </>
                 )}
               </div>
+              {isOwnProfile && (
+                <section className="mt-16 min-w-0 flex-1 rounded-xl border border-sky-100 bg-sky-50/90 px-3 py-2.5 shadow-sm sm:px-4" aria-label="Profile Viewers">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-sky-700 shadow-sm"><Eye className="h-3.5 w-3.5" /></span>
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-black text-slate-800 sm:text-sm">Profile viewers</p>
+                        <p className="truncate text-[10px] text-slate-500 sm:text-xs">Last 30 days · only you can see this</p>
+                      </div>
+                    </div>
+                    <span className="shrink-0 text-base font-black text-sky-700 sm:text-lg">{profileViewerSummary?.totalCount ?? 0}</span>
+                  </div>
+                  {(profileViewerSummary?.recentViewers?.length ?? 0) > 0 ? (
+                    <div className="mt-2 flex min-w-0 items-center gap-1.5 border-t border-sky-100 pt-2">
+                      <div className="flex shrink-0 -space-x-2">
+                        {profileViewerSummary!.recentViewers.slice(0, 5).map((viewer) => (
+                          <a key={viewer.id} href={`/profile/${viewer.id}`} title={viewer.name ?? "Profile viewer"} className="block h-6 w-6 overflow-hidden rounded-full border-2 border-sky-50 bg-sky-200 sm:h-7 sm:w-7">
+                            {viewer.avatar ? <img src={viewer.avatar} alt="" className="h-full w-full object-cover" /> : <span className="flex h-full w-full items-center justify-center text-[8px] font-black text-sky-800">{(viewer.name ?? "?").charAt(0).toUpperCase()}</span>}
+                          </a>
+                        ))}
+                      </div>
+                      <p className="min-w-0 truncate text-[10px] text-slate-600 sm:text-xs">{profileViewerSummary!.recentViewers.map((viewer) => viewer.name ?? "A member").join(", ")}</p>
+                    </div>
+                  ) : <p className="mt-1.5 text-[10px] leading-snug text-slate-500 sm:text-xs">Views from other signed-in members will appear here.</p>}
+                </section>
+              )}
             </div>{/* end avatar row */}
 
             {/* Actions row — arranged to match the requested mobile profile layout */}
@@ -1073,32 +1099,6 @@ export default function Profile() {
           </div>
         </div>
 
-        {isOwnProfile && (
-          <section className="mb-4 rounded-2xl border border-sky-100 bg-sky-50/70 px-4 py-3 shadow-sm" aria-label="Profile Viewers">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-sky-700 shadow-sm"><Eye className="h-4 w-4" /></span>
-                <div>
-                  <p className="text-sm font-black text-slate-800">Profile viewers</p>
-                  <p className="text-xs text-slate-500">Last 30 days · only you can see this</p>
-                </div>
-              </div>
-              <span className="text-lg font-black text-sky-700">{profileViewerSummary?.totalCount ?? 0}</span>
-            </div>
-            {(profileViewerSummary?.recentViewers?.length ?? 0) > 0 ? (
-              <div className="mt-3 flex items-center gap-2 border-t border-sky-100 pt-3">
-                <div className="flex -space-x-2">
-                  {profileViewerSummary!.recentViewers.slice(0, 5).map((viewer) => (
-                    <a key={viewer.id} href={`/profile/${viewer.id}`} title={viewer.name ?? "Profile viewer"} className="block h-8 w-8 overflow-hidden rounded-full border-2 border-sky-50 bg-sky-200">
-                      {viewer.avatar ? <img src={viewer.avatar} alt="" className="h-full w-full object-cover" /> : <span className="flex h-full w-full items-center justify-center text-[10px] font-black text-sky-800">{(viewer.name ?? "?").charAt(0).toUpperCase()}</span>}
-                    </a>
-                  ))}
-                </div>
-                <p className="min-w-0 truncate text-xs text-slate-600">{profileViewerSummary!.recentViewers.map((viewer) => viewer.name ?? "A member").join(", ")}</p>
-              </div>
-            ) : <p className="mt-2 text-xs text-slate-500">Views from other signed-in members will appear here.</p>}
-          </section>
-        )}
 
         {/* Bio card — shown when user has bio, role, location, or website */}
         {!editing && (user.bio || user.currentRole || user.hometown || user.currentLocation || birthDayMonth || user.hobby || user.website || user.youtubeChannel) && (

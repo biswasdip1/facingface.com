@@ -281,6 +281,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
   // Only ordinary wall posts offer an audience choice. Context posts retain
   // their established Page or Group visibility rules.
   const [audience, setAudience] = useState<"public" | "private">("public");
+  const [showAudienceMenu, setShowAudienceMenu] = useState(false);
   const [showAddToPost, setShowAddToPost] = useState(false);
   const [activePostExtra, setActivePostExtra] = useState<"tag" | "feeling" | "checkin" | null>(null);
   const [taggedFriendIds, setTaggedFriendIds] = useState<number[]>([]);
@@ -406,6 +407,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
     setDocFile(null);
     setScheduledAt(undefined);
     setAudience("public");
+    setShowAudienceMenu(false);
     setShowAddToPost(false);
     setActivePostExtra(null);
     setTaggedFriendIds([]);
@@ -420,6 +422,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
       setShowDiscardDialog(true);
     } else {
       if (open && !isContextPost) setAudience("public");
+      if (!open) setShowAudienceMenu(false);
       setModalOpen(open);
     }
   };
@@ -980,8 +983,8 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
           <form onSubmit={handleSubmit}>
 
           {/* Modal header */}
-          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-            <div className="flex items-center gap-3">
+          <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-border">
+            <div className="flex min-w-0 items-center gap-3">
               <ComposerAvatar src={pageHandle ? pageAvatar : user?.avatar} name={pageHandle ? (pageName ?? pageHandle) : user?.name} />
               <div>
                 <p className="text-sm font-bold text-foreground leading-none">{pageHandle ? (pageName ?? pageHandle) : (user?.name ?? "You")}</p>
@@ -996,7 +999,33 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
                 </p>
               </div>
             </div>
-
+            {!isContextPost && (
+              <div className="relative mr-7 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAudienceMenu((open) => !open);
+                    setShowAddToPost(false);
+                    setActivePostExtra(null);
+                    setShowEmojiPicker(false);
+                  }}
+                  className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-xs font-bold text-foreground shadow-sm transition-colors hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label="Choose post audience"
+                  aria-expanded={showAudienceMenu}
+                  title="Choose who can see this post"
+                >
+                  {audience === "public" ? <Globe2 size={14} aria-hidden="true" /> : <Lock size={14} aria-hidden="true" />}
+                  {audience === "public" ? "Public" : "Private"}
+                  <ChevronDown size={14} className={showAudienceMenu ? "rotate-180 transition-transform" : "transition-transform"} aria-hidden="true" />
+                </button>
+                {showAudienceMenu && (
+                  <div className="absolute right-0 top-full z-50 mt-2 w-44 overflow-hidden rounded-lg border border-border bg-popover p-1.5 shadow-xl" role="menu" aria-label="Post audience">
+                    <button type="button" role="menuitemradio" aria-checked={audience === "public"} onClick={() => { setAudience("public"); setShowAudienceMenu(false); }} className={`inline-flex w-full items-center gap-2 rounded-md px-2.5 py-2.5 text-left text-sm font-semibold transition-colors ${audience === "public" ? "bg-blue-500/10 text-blue-700" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}><Globe2 size={16} />Public{audience === "public" && <span className="ml-auto">✓</span>}</button>
+                    <button type="button" role="menuitemradio" aria-checked={audience === "private"} onClick={() => { setAudience("private"); setShowAudienceMenu(false); }} className={`inline-flex w-full items-center gap-2 rounded-md px-2.5 py-2.5 text-left text-sm font-semibold transition-colors ${audience === "private" ? "bg-amber-500/10 text-amber-700" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}><Lock size={16} />Private{audience === "private" && <span className="ml-auto">✓</span>}</button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Modal body */}
@@ -1056,6 +1085,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
             type="button"
             onClick={() => {
               setShowAddToPost((open) => !open);
+              setShowAudienceMenu(false);
               setActivePostExtra(null);
               setShowEmojiPicker(false);
             }}
@@ -1068,10 +1098,6 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
           </button>
           {showAddToPost && (
             <div className="absolute right-0 top-7 z-40 w-52 rounded-lg border border-border bg-popover p-1.5 shadow-xl" role="menu" aria-label="More post options">
-              <p className="px-2.5 pb-1 pt-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Post audience</p>
-              <button type="button" role="menuitem" onClick={() => { setAudience("public"); setShowAddToPost(false); }} className={`inline-flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-semibold transition-colors ${audience === "public" ? "bg-blue-500/10 text-blue-700" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}><Globe2 size={16} />Public{audience === "public" && <span className="ml-auto text-[10px]">✓</span>}</button>
-              <button type="button" role="menuitem" onClick={() => { setAudience("private"); setShowAddToPost(false); }} className={`inline-flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-semibold transition-colors ${audience === "private" ? "bg-amber-500/10 text-amber-700" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}><Lock size={16} />Private{audience === "private" && <span className="ml-auto text-[10px]">✓</span>}</button>
-              <div className="mx-2 my-1 border-t border-border" />
               <button type="button" role="menuitem" onClick={() => { setActivePostExtra("tag"); setShowAddToPost(false); }} className={`inline-flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-semibold transition-colors ${taggedFriendIds.length > 0 ? "bg-blue-500/10 text-blue-700" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}><UserPlus size={16} />Tag</button>
               <button type="button" role="menuitem" onClick={() => { setActivePostExtra("feeling"); setShowAddToPost(false); }} className={`inline-flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-semibold transition-colors ${feeling ? "bg-amber-500/10 text-amber-700" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}><Smile size={16} />Feeling</button>
               <button type="button" role="menuitem" onClick={() => { setActivePostExtra("checkin"); setShowAddToPost(false); }} className={`inline-flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-semibold transition-colors ${checkInLocation.trim() ? "bg-rose-500/10 text-rose-700" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}><MapPin size={16} />Check in</button>
