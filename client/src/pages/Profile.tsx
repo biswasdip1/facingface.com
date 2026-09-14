@@ -17,6 +17,44 @@ const formatBirthDayMonth = (day?: number | null, month?: number | null) => {
   return `${day} ${BIRTH_MONTHS[month - 1]}`;
 };
 
+/**
+ * Creates the same square crop shown in the profile-photo preview. The saved
+ * file therefore keeps the chosen centre/position on every device instead of
+ * relying on a temporary browser-only object-position value.
+ */
+async function createAvatarCropDataUrl(file: File, position: { x: number; y: number }): Promise<string> {
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    image.decoding = "async";
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("The selected image could not be read."));
+      image.src = objectUrl;
+    });
+
+    const sourceWidth = image.naturalWidth || image.width;
+    const sourceHeight = image.naturalHeight || image.height;
+    if (!sourceWidth || !sourceHeight) throw new Error("The selected image has no usable dimensions.");
+
+    const cropSize = Math.min(sourceWidth, sourceHeight);
+    const maxLeft = Math.max(0, sourceWidth - cropSize);
+    const maxTop = Math.max(0, sourceHeight - cropSize);
+    const sourceLeft = maxLeft * (Math.max(0, Math.min(100, position.x)) / 100);
+    const sourceTop = maxTop * (Math.max(0, Math.min(100, position.y)) / 100);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 512;
+    canvas.height = 512;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Profile photo crop could not be prepared.");
+    context.drawImage(image, sourceLeft, sourceTop, cropSize, cropSize, 0, 0, 512, 512);
+    return canvas.toDataURL("image/jpeg", 0.92);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 export default function Profile() {
   const { user: currentUser } = useAuth();
   const params = useParams<{ id?: string }>();
@@ -57,8 +95,37 @@ export default function Profile() {
   const [avatarCropOffset, setAvatarCropOffset] = useState({ x: 50, y: 50 }); // percent
   const [isDraggingAvatarCrop, setIsDraggingAvatarCrop] = useState(false);
   const avatarCropDragStart = useRef<{ clientX: number; clientY: number; ox: number; oy: number } | null>(null);
+
+  const discardAvatarDraft = () => {
+    setIsDraggingAvatarCrop(false);
+    avatarCropDragStart.current = null;
+    setAvatarCropOffset({ x: 50, y: 50 });
+    setAvatarCropFile(null);
+    setAvatarCropSrc((current) => {
+      if (current?.startsWith("blob:")) URL.revokeObjectURL(current);
+      return null;
+    });
+  };
+
   const cropDragStartY = useRef<number>(0);
   const cropDragStartPos = useRef<number>(50);
+
+  const discardCoverDraft = () => {
+    setIsDraggingCrop(false);
+    setCropPosition({ y: 50 });
+    setCropFile(null);
+    setCropSrc((current) => {
+      if (current?.startsWith("blob:")) URL.revokeObjectURL(current);
+      return null;
+    });
+  };
+
+  const openCoverPicker = () => {
+    if (coverUploading) return;
+    // A cover edit must never leave the photo lightbox open underneath it.
+    setCoverLightboxOpen(false);
+    coverRef.current?.click();
+  };
 
   // Friend request state
   const { data: friendStatus } = trpc.friends.status.useQuery(
@@ -294,7 +361,9 @@ export default function Profile() {
     if (!file.type.startsWith("image/")) { toast.error("Only images allowed."); return; }
     if (file.size > 5 * 1024 * 1024) { toast.error("Image must be under 5MB."); return; }
 
-    // Show avatar crop tool instead of uploading immediately
+    // Show the crop tool before uploading. The position is baked into the file
+    // only after the member deliberately chooses Save Photo.
+    discardAvatarDraft();
     const objectUrl = URL.createObjectURL(file);
     setAvatarCropSrc(objectUrl);
     setAvatarCropFile(file);
@@ -306,28 +375,31 @@ export default function Profile() {
     if (!avatarCropFile) return;
     setUploading(true);
     try {
-      const dataUrl = await fileToBase64(avatarCropFile);
-      await uploadProfilePhotoHistory.mutateAsync({ dataUrl, mimeType: avatarCropFile.type });
-      setAvatarCropSrc(null);
-      setAvatarCropFile(null);
+      const dataUrl = await createAvatarCropDataUrl(avatarCropFile, avatarCropOffset);
+      await uploadProfilePhotoHistory.mutateAsync({ dataUrl, mimeType: "image/jpeg" });
+      discardAvatarDraft();
       toast.success("Profile photo updated!");
-    } catch {
-      toast.error("Avatar upload failed.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Avatar upload failed.");
     }
     setUploading(false);
   };
 
   const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    // A programmatic file-input click can originate from the cover area. Keep it
+    // completely separate from the normal “view cover photo” click behavior.
+    e.stopPropagation();
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) { toast.error("Only images allowed."); return; }
     if (file.size > 10 * 1024 * 1024) { toast.error("Cover image must be under 10MB."); return; }
-    // Show crop tool instead of uploading immediately
+    discardCoverDraft();
     const objectUrl = URL.createObjectURL(file);
+    setCoverLightboxOpen(false);
     setCropSrc(objectUrl);
     setCropFile(file);
     setCropPosition({ y: 50 });
-    // Reset input so same file can be re-selected
+    // Reset input so the same file can be deliberately selected again.
     if (coverRef.current) coverRef.current.value = "";
   };
 
@@ -338,8 +410,7 @@ export default function Profile() {
       const dataUrl = await fileToBase64(cropFile);
       await uploadCoverPhotoHistory.mutateAsync({ dataUrl, mimeType: cropFile.type, cropY: cropPosition.y });
       toast.success("Cover photo updated.");
-      setCropSrc(null);
-      setCropFile(null);
+      discardCoverDraft();
     } catch {
       toast.error("Cover photo upload failed.");
     }
@@ -409,6 +480,11 @@ export default function Profile() {
     }
   };
 
+  // If a draft exists, the crop editor is the only cover-related layer allowed.
+  useEffect(() => {
+    if (cropSrc) setCoverLightboxOpen(false);
+  }, [cropSrc]);
+
   if (!targetId) return null;
 
   if (profileLoading) {
@@ -472,7 +548,7 @@ export default function Profile() {
             alt="Cover photo"
             onClose={() => setCoverLightboxOpen(false)}
             actionLabel={isOwnProfile ? "Change Cover" : undefined}
-            onAction={isOwnProfile ? () => { setCoverLightboxOpen(false); coverRef.current?.click(); } : undefined}
+            onAction={isOwnProfile ? openCoverPicker : undefined}
           />
         )}
 
@@ -506,7 +582,7 @@ export default function Profile() {
               <p className="text-white/50 text-[10px] text-center mb-4">Drag to reposition · Your photo will be cropped to a circle</p>
               <div className="flex gap-3 justify-center">
                 <button
-                  onClick={() => { setAvatarCropSrc(null); setAvatarCropFile(null); }}
+                  onClick={discardAvatarDraft}
                   className="px-5 py-2 text-xs font-bold uppercase tracking-widest border border-white/40 text-white hover:bg-white/10 transition-colors"
                 >
                   Cancel
@@ -527,7 +603,7 @@ export default function Profile() {
 
         {/* ── Cover Crop Tool Overlay ── */}
         {cropSrc && (
-          <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80">
+          <div className="fixed inset-0 z-[70] flex flex-col items-center justify-center bg-black/80">
             <div className="w-full max-w-lg px-4">
               <p className="text-white text-xs font-bold uppercase tracking-widest mb-3 text-center">Drag to reposition cover photo</p>
               {/* Preview window */}
@@ -569,7 +645,7 @@ export default function Profile() {
               </div>
               <div className="flex gap-3 mt-4 justify-center">
                 <button
-                  onClick={() => { setCropSrc(null); setCropFile(null); }}
+                  onClick={discardCoverDraft}
                   className="px-5 py-2 text-xs font-bold uppercase tracking-widest border border-white/40 text-white hover:bg-white/10 transition-colors"
                 >
                   Cancel
@@ -597,9 +673,9 @@ export default function Profile() {
             }`}
             onClick={
               isOwnProfile && !user.coverPhoto
-                ? () => coverRef.current?.click()
+                ? openCoverPicker
                 : user.coverPhoto
-                ? () => setCoverLightboxOpen(true)
+                ? () => { if (!cropSrc && !coverUploading) setCoverLightboxOpen(true); }
                 : undefined
             }
             title={isOwnProfile && !user.coverPhoto ? "Add cover photo" : user.coverPhoto ? "View cover photo" : undefined}
@@ -645,7 +721,7 @@ export default function Profile() {
                       // full-screen viewer underneath the crop editor.
                       event.preventDefault();
                       event.stopPropagation();
-                      coverRef.current?.click();
+                      openCoverPicker();
                     }}
                     disabled={coverUploading}
                     className="absolute bottom-2 right-2 text-white px-3 py-1.5 text-xs font-bold uppercase tracking-widest transition-colors flex items-center gap-1.5"
@@ -661,7 +737,14 @@ export default function Profile() {
                     Change Cover
                   </button>
                 )}
-                <input ref={coverRef} type="file" accept="image/*" className="hidden" onChange={handleCoverUpload} />
+                <input
+                  ref={coverRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={handleCoverUpload}
+                />
               </>
             )}
           </div>
