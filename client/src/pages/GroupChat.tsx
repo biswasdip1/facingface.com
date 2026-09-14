@@ -7,7 +7,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Send, ArrowLeft, Users, Plus, Video, Phone, UserPlus, LogOut, X, Pin, BellOff, Bell, Camera } from "lucide-react";
+import { Send, ArrowLeft, Users, Plus, Video, Phone, UserPlus, LogOut, X, Pin, BellOff, Bell, Camera, Search, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useLocation } from "wouter";
@@ -344,6 +344,15 @@ export function GroupThread({ groupId, onBack }: { groupId: number; onBack: () =
             <Button variant="ghost" size="icon" title="Video call" className="hidden sm:inline-flex" onClick={() => startCallMutation.mutate({ groupId, type: "video" })}>
               <Video className="w-4 h-4" />
             </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              title="Open in Messenger"
+              className="hidden md:inline-flex"
+              onClick={() => navigate(`/messages?tab=groups&group=${groupId}`)}
+            >
+              <MessageCircle className="w-4 h-4" />
+            </Button>
             <Button variant="ghost" size="icon" title="Members" onClick={() => setShowMembers(v => !v)}>
               <Users className="w-4 h-4" />
             </Button>
@@ -566,70 +575,109 @@ export function GroupThread({ groupId, onBack }: { groupId: number; onBack: () =
 
 export default function GroupChat() {
   const [activeGroupId, setActiveGroupId] = useState<number | null>(null);
+  const [groupSearch, setGroupSearch] = useState("");
+  const [, navigate] = useLocation();
   const utils = trpc.useUtils();
 
   const { data: groups = [], isLoading } = trpc.groups.list.useQuery(undefined, {
     refetchInterval: 10000,
   });
+  const visibleGroups = groups.filter((group) =>
+    group.name.toLowerCase().includes(groupSearch.trim().toLowerCase()) ||
+    (group.description ?? "").toLowerCase().includes(groupSearch.trim().toLowerCase())
+  );
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6">
-      <div className="border rounded-xl overflow-hidden bg-background flex h-[calc(100vh-8rem)]">
-        {/* Group list */}
-        <div className={cn(
-          "w-full sm:w-72 border-r flex flex-col",
+    <div className="mx-auto max-w-6xl px-3 py-4 sm:px-4 sm:py-6">
+      <div className="flex h-[calc(100dvh-8rem)] min-h-[520px] overflow-hidden rounded-2xl border bg-background shadow-sm">
+        {/* Messenger-style group inbox */}
+        <aside className={cn(
+          "flex w-full flex-col border-r bg-card sm:w-80 sm:min-w-80",
           activeGroupId !== null ? "hidden sm:flex" : "flex"
         )}>
-          <div className="flex items-center justify-between px-4 py-3 border-b">
-            <h2 className="font-bold text-sm uppercase tracking-wider">Groups</h2>
-            <CreateGroupDialog onCreated={(id) => { utils.groups.list.invalidate(); setActiveGroupId(id); }} />
+          <div className="border-b px-4 pb-3 pt-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"><Users className="h-5 w-5" /></span>
+                <div className="min-w-0">
+                  <h2 className="truncate text-lg font-black">Group chats</h2>
+                  <p className="text-xs text-muted-foreground">{groups.length} group{groups.length === 1 ? "" : "s"} you belong to</p>
+                </div>
+              </div>
+              <CreateGroupDialog onCreated={(id) => { utils.groups.list.invalidate(); setActiveGroupId(id); }} />
+            </div>
+            <label className="mt-3 flex items-center gap-2 rounded-full bg-muted px-3 py-2.5 focus-within:ring-2 focus-within:ring-ring/40">
+              <Search className="h-4 w-4 text-muted-foreground" />
+              <input
+                value={groupSearch}
+                onChange={(event) => setGroupSearch(event.target.value)}
+                placeholder="Find a group"
+                className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                aria-label="Find a group"
+              />
+              {groupSearch && <button type="button" onClick={() => setGroupSearch("")} className="rounded-full p-0.5 text-muted-foreground hover:bg-background" aria-label="Clear group search"><X className="h-3.5 w-3.5" /></button>}
+            </label>
           </div>
-          <ScrollArea className="flex-1">
-            {isLoading && <p className="text-center text-muted-foreground text-sm py-8">Loading...</p>}
+          <ScrollArea className="min-h-0 flex-1">
+            {isLoading && <p className="py-8 text-center text-sm text-muted-foreground">Loading groups...</p>}
             {!isLoading && groups.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-40 gap-2 text-muted-foreground">
-                <Users className="w-8 h-8 opacity-30" />
-                <p className="text-sm">No groups yet</p>
-                <p className="text-xs">Create one to get started</p>
+              <div className="flex h-56 flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
+                <Users className="h-10 w-10 opacity-25" />
+                <p className="text-sm font-semibold">No group chats yet</p>
+                <p className="text-xs">Create a group for friends, family, or a team.</p>
               </div>
             )}
-            <div className="divide-y">
-              {groups.map((g) => (
+            {!isLoading && groups.length > 0 && visibleGroups.length === 0 && (
+              <div className="px-6 py-10 text-center text-sm text-muted-foreground">No groups match “{groupSearch}”.</div>
+            )}
+            <div className="space-y-1 p-2">
+              {visibleGroups.map((g) => (
                 <button
                   key={g.id}
                   className={cn(
-                    "w-full flex items-center gap-3 px-4 py-3 hover:bg-muted text-left transition-colors",
-                    activeGroupId === g.id && "bg-muted"
+                    "flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors",
+                    activeGroupId === g.id ? "bg-primary/10 ring-1 ring-primary/20" : "hover:bg-muted"
                   )}
                   onClick={() => setActiveGroupId(g.id)}
+                  aria-label={`Open ${g.name}`}
                 >
-                  <Avatar className="h-10 w-10 shrink-0 border border-primary/10 shadow-sm">
+                  <Avatar className="h-11 w-11 shrink-0 border border-primary/10 shadow-sm">
                     <AvatarImage src={g.avatar ?? undefined} />
                     <AvatarFallback className="bg-gradient-to-br from-blue-600 to-indigo-600 text-sm font-black text-white">
                       {getInitials(g.name)}
                     </AvatarFallback>
                   </Avatar>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium truncate text-sm">{g.name}</p>
-                    {g.description && <p className="text-xs text-muted-foreground truncate">{g.description}</p>}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold">{g.name}</p>
+                    <p className="truncate text-xs text-muted-foreground">{g.description || "Group conversation"}</p>
                   </div>
                 </button>
               ))}
             </div>
           </ScrollArea>
-        </div>
+          <div className="border-t p-2">
+            <Button variant="ghost" className="w-full justify-start gap-2 text-primary" onClick={() => navigate("/messages?tab=groups")}>
+              <MessageCircle className="h-4 w-4" /> Open groups in Messenger
+            </Button>
+          </div>
+        </aside>
 
-        {/* Thread or empty state */}
+        {/* Thread or Messenger-style empty state */}
         {activeGroupId !== null ? (
           <GroupThread
             groupId={activeGroupId}
             onBack={() => setActiveGroupId(null)}
           />
         ) : (
-          <div className="hidden sm:flex flex-1 items-center justify-center flex-col gap-3 text-muted-foreground">
-            <Users className="w-12 h-12 opacity-20" />
-            <p className="font-medium">Select a group to chat</p>
-            <p className="text-sm">or create a new one</p>
+          <div className="hidden flex-1 flex-col items-center justify-center gap-4 px-8 text-center sm:flex">
+            <span className="flex h-20 w-20 items-center justify-center rounded-3xl bg-primary/10 text-primary"><Users className="h-10 w-10" /></span>
+            <div>
+              <p className="text-lg font-black">Your group conversations</p>
+              <p className="mt-1 max-w-sm text-sm text-muted-foreground">Choose a group to message members, manage people, pin important notes, or start a group voice or video call.</p>
+            </div>
+            <Button variant="outline" onClick={() => navigate("/messages?tab=groups")}>
+              <MessageCircle className="mr-2 h-4 w-4" /> Open unified Messenger
+            </Button>
           </div>
         )}
       </div>

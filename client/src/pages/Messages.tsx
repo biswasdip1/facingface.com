@@ -241,14 +241,37 @@ export default function Messages() {
     return () => clearInterval(interval);
   }, []);
 
-  // Handle ?conv=ID&msg=TEXT URL params. useSearch reacts to same-route query changes.
+  // Handle direct-message and unified group-chat URL parameters.
+  // useSearch reacts to same-route query changes without recreating either chat.
   useEffect(() => {
     const params = new URLSearchParams(search);
     const convParam = params.get("conv");
+    const groupParam = params.get("group");
+    const tabParam = params.get("tab");
     const msgParam = params.get("msg");
+
+    if (groupParam) {
+      const groupId = parseInt(groupParam, 10);
+      if (!isNaN(groupId)) {
+        setSidebarTab("groups");
+        setActiveGroupId(groupId);
+        setActiveConvId(null);
+        return;
+      }
+    }
+
+    if (tabParam === "groups") {
+      setSidebarTab("groups");
+      setActiveConvId(null);
+    }
+
     if (convParam) {
       const convId = parseInt(convParam, 10);
-      if (!isNaN(convId)) setActiveConvId(convId);
+      if (!isNaN(convId)) {
+        setSidebarTab("dms");
+        setActiveConvId(convId);
+        setActiveGroupId(null);
+      }
     }
     if (msgParam) setText(decodeURIComponent(msgParam));
   }, [search]);

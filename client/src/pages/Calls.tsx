@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -16,8 +17,11 @@ import {
   PhoneMissed,
   Users,
   History,
+  Search,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useLocation } from "wouter";
 
 function getInitials(name: string) {
   return name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
@@ -55,11 +59,13 @@ const ICE_SERVERS = [
 
 export default function Calls() {
   const { user } = useAuth();
+  const [, navigate] = useLocation();
   const { data: relayConfig, isLoading: relayConfigLoading } = trpc.calls.iceServers.useQuery(undefined, {
     staleTime: 45 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
   const [activeTab, setActiveTab] = useState<"friends" | "history">("friends");
+  const [friendSearch, setFriendSearch] = useState("");
   const [callState, setCallState] = useState<CallState>({ type: "idle" });
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
@@ -77,7 +83,11 @@ export default function Calls() {
   const socketRef = useRef<any>(null);
 
   const utils = trpc.useUtils();
-  const { data: friends = [] } = trpc.friends.list.useQuery();
+  const { data: friends = [] } = trpc.friends.listEnriched.useQuery();
+  const filteredFriends = friends.filter((row) => {
+    const name = String(row.friend?.name ?? "").toLowerCase();
+    return name.includes(friendSearch.trim().toLowerCase());
+  });
   const { data: historyData } = trpc.callHistory.list.useQuery(
     { limit: 30 },
     { enabled: activeTab === "history" }
@@ -440,22 +450,52 @@ export default function Calls() {
       {/* Friends tab */}
       {activeTab === "friends" && (
         <>
+          <div className="mb-4 rounded-2xl border bg-card p-3 sm:p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-bold">Find a friend to call</p>
+                <p className="text-xs text-muted-foreground">Search your accepted friends, then choose voice or video.</p>
+              </div>
+              <div className="relative w-full sm:max-w-sm">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={friendSearch}
+                  onChange={(event) => setFriendSearch(event.target.value)}
+                  placeholder="Search friends by name..."
+                  className="h-10 rounded-full pl-9 pr-9"
+                  aria-label="Find a friend to call"
+                />
+                {friendSearch && (
+                  <button type="button" onClick={() => setFriendSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-muted-foreground hover:bg-muted" aria-label="Clear friend search">
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
           {friends.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <Users className="w-12 h-12 mx-auto mb-3 opacity-30" />
               <p>Add friends first to start a call.</p>
             </div>
+          ) : filteredFriends.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">
+              <Search className="w-10 h-10 mx-auto mb-3 opacity-30" />
+              <p>No friends match “{friendSearch}”.</p>
+            </div>
           ) : (
             <div className="space-y-2">
-              {friends.map((f) => {
-                const otherId = f.userId1 === user?.id ? f.userId2 : f.userId1;
+              {filteredFriends.map((row) => {
+                const friend = row.friend;
+                if (!friend) return null;
                 return (
                   <FriendCallRow
-                    key={f.id}
-                    userId={otherId}
+                    key={row.id}
+                    friend={friend}
                     disabled={callState.type !== "idle" || relayConfigLoading}
-                    onAudioCall={(name) => startCall(otherId, name, false)}
-                    onVideoCall={(name) => startCall(otherId, name, true)}
+                    onOpenProfile={() => navigate(`/profile/${friend.id}`)}
+                    onAudioCall={(name) => startCall(friend.id, name, false)}
+                    onVideoCall={(name) => startCall(friend.id, name, true)}
                   />
                 );
               })}
@@ -555,35 +595,38 @@ export default function Calls() {
 }
 
 function FriendCallRow({
-  userId,
+  friend,
   disabled,
+  onOpenProfile,
   onAudioCall,
   onVideoCall,
 }: {
-  userId: number;
+  friend: { id: number; name: string | null; avatar: string | null; isVerified?: boolean | null };
   disabled: boolean;
+  onOpenProfile: () => void;
   onAudioCall: (name: string) => void;
   onVideoCall: (name: string) => void;
 }) {
-  const { data: profileData } = trpc.users.getProfile.useQuery({ userId });
-  const u = profileData?.user;
-  if (!u) return null;
+  const name = friend.name ?? "Friend";
 
   return (
-    <div className="flex items-center gap-4 p-3 rounded-xl border border-border bg-card hover:bg-muted/30 transition-colors">
-      <Avatar className="w-10 h-10">
-        <AvatarImage src={u.avatar ?? undefined} />
-        <AvatarFallback>{getInitials(u.name ?? "?")}</AvatarFallback>
-      </Avatar>
-      <div className="flex-1 min-w-0">
-        <p className="font-semibold truncate text-sm">{u.name}</p>
-      </div>
-      <div className="flex gap-2">
-        <Button variant="outline" size="sm" disabled={disabled} onClick={() => onAudioCall(u.name ?? "")} title="Audio call">
-          <Phone className="w-4 h-4 mr-1" /> Call
+    <div className="flex items-center gap-3 rounded-2xl border border-border bg-card p-3 transition-colors hover:bg-muted/30 sm:gap-4">
+      <button type="button" onClick={onOpenProfile} className="shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" title={`Open ${name}'s profile`}>
+        <Avatar className="w-10 h-10">
+          <AvatarImage src={friend.avatar ?? undefined} />
+          <AvatarFallback>{getInitials(name)}</AvatarFallback>
+        </Avatar>
+      </button>
+      <button type="button" onClick={onOpenProfile} className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:underline" title={`Open ${name}'s profile`}>
+        <p className="truncate text-sm font-semibold">{name}</p>
+        <p className="text-xs text-muted-foreground">Friend · tap to view profile</p>
+      </button>
+      <div className="flex shrink-0 gap-1.5 sm:gap-2">
+        <Button variant="outline" size="sm" disabled={disabled} onClick={() => onAudioCall(name)} title={`Voice call ${name}`} className="px-2.5 sm:px-3">
+          <Phone className="w-4 h-4 sm:mr-1" /><span className="hidden sm:inline">Call</span>
         </Button>
-        <Button variant="outline" size="sm" disabled={disabled} onClick={() => onVideoCall(u.name ?? "")} title="Video call">
-          <Video className="w-4 h-4 mr-1" /> Video
+        <Button variant="outline" size="sm" disabled={disabled} onClick={() => onVideoCall(name)} title={`Video call ${name}`} className="px-2.5 sm:px-3">
+          <Video className="w-4 h-4 sm:mr-1" /><span className="hidden sm:inline">Video</span>
         </Button>
       </div>
     </div>
