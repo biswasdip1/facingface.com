@@ -1215,17 +1215,29 @@ export default function PostCard({ post, author, likeCount, commentCount = 0, is
       return urlObj.searchParams.get("v");
     } catch { return null; }
   };
-  // Extract YouTube video ID from text URLs
-  const youtubeVideoId = (() => {
-    if (!post.text) return null;
-    const urlMatch = post.text.match(/https?:\/\/[^\s<>"{}|\\^`[\]]+/gi);
-    if (!urlMatch) return null;
-    for (const url of urlMatch) {
+  // YouTube URLs are rendered as one player. A Shorts URL uses a vertical
+  // player and deliberately suppresses the generic link card below it.
+  const youtubeEmbed = (() => {
+    const sourceUrls = [...postUrls, post.linkUrl].filter((url): url is string => Boolean(url));
+    for (const url of sourceUrls) {
       const id = extractYouTubeVideoId(url);
-      if (id) return id;
+      if (!id) continue;
+      try {
+        const parsed = new URL(url);
+        const hostname = parsed.hostname.toLowerCase();
+        return {
+          id,
+          isShort: hostname.includes("youtube.com") && /^\/shorts\/[^/]+/i.test(parsed.pathname),
+        };
+      } catch {
+        return { id, isShort: false };
+      }
     }
     return null;
   })();
+  const youtubeVideoId = youtubeEmbed?.id ?? null;
+  const isYouTubeShort = youtubeEmbed?.isShort ?? false;
+  const shouldRenderLinkPreview = Boolean(hasLinkPreview && !youtubeVideoId);
 
   const photos = [post.mediaUrl, post.photo2Url, post.photo3Url].filter(Boolean) as string[];
   const captions = [post.photo1Caption ?? null, post.photo2Caption ?? null, post.photo3Caption ?? null];
@@ -1675,24 +1687,28 @@ export default function PostCard({ post, author, likeCount, commentCount = 0, is
           </div>
         )}
 
-        {/* YouTube Embed */}
+        {/* YouTube / YouTube Shorts — one clean player, never a second link card. */}
         {youtubeVideoId && (
-          <div className="mb-4 border border-border overflow-hidden bg-black" style={{ aspectRatio: "16/9" }} onClick={(e) => e.stopPropagation()}>
+          <div
+            className={`mb-4 overflow-hidden border border-border bg-black ${isYouTubeShort ? "mx-auto w-full max-w-[420px]" : ""}`}
+            style={{ aspectRatio: isYouTubeShort ? "9 / 16" : "16 / 9" }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <iframe
               width="100%"
               height="100%"
-              src={`https://www.youtube.com/embed/${youtubeVideoId}?rel=0`}
-              title="YouTube video"
+              src={`https://www.youtube.com/embed/${youtubeVideoId}?rel=0&playsinline=1`}
+              title={isYouTubeShort ? "YouTube Short" : "YouTube video"}
               frameBorder="0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               allowFullScreen
               style={{ border: "none", display: "block" }}
             />
           </div>
         )}
 
-        {/* Link Preview */}
-        {hasLinkPreview && (
+        {/* Link Preview — not rendered below an embedded YouTube player. */}
+        {shouldRenderLinkPreview && (
           <a href={post.linkUrl!} target="_blank" rel="noopener noreferrer"
             className="block mb-4 border border-border overflow-hidden hover:border-black transition-colors no-underline group" onClick={(e) => e.stopPropagation()}>
             {post.linkImage && (

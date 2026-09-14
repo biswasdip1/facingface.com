@@ -78,6 +78,17 @@ function extractFirstUrl(text: string): string | null {
   return match ? match[0] : null;
 }
 
+function isYouTubeShortUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    return (hostname === "youtube.com" || hostname === "m.youtube.com") && /^\/shorts\/[^/]+/i.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
 interface PollDraft {
   question: string;
   options: string[];
@@ -844,6 +855,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
 
 
   const showPreviewCard = !previewDismissed && !showPoll && previewUrl && (previewLoading || preview);
+  const isYouTubeShortPreview = isYouTubeShortUrl(previewUrl);
 
   // Dynamic text styles
   const fontSize = getDynamicFontSize(text);
@@ -1222,23 +1234,47 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
               <span>Fetching link preview…</span>
             </div>
           ) : preview ? (
-            <a href={preview.url} target="_blank" rel="noopener noreferrer" className="flex gap-0 hover:bg-secondary transition-colors no-underline" onClick={(e) => e.stopPropagation()}>
-              {preview.image && (
-                <div className="w-28 flex-shrink-0 bg-secondary">
-                  <img src={preview.image} alt={preview.title ?? ""} className="w-full h-full object-cover" style={{ minHeight: "80px", maxHeight: "120px" }} onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+            isYouTubeShortPreview ? (
+              <a
+                href={preview.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 bg-secondary/40 p-2.5 no-underline hover:bg-secondary transition-colors"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="relative h-24 w-14 shrink-0 overflow-hidden rounded bg-black">
+                  {preview.image ? (
+                    <img src={preview.image} alt="YouTube Short preview" className="h-full w-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center bg-[#ff0000] text-white"><Film size={18} /></div>
+                  )}
+                  <span className="absolute inset-0 flex items-center justify-center bg-black/25 text-white"><Film size={18} fill="currentColor" /></span>
                 </div>
-              )}
-              <div className="flex-1 p-3 min-w-0">
-                {preview.siteName && (
-                  <div className="flex items-center gap-1 mb-1">
-                    <Link2 size={10} className="text-[var(--its-red)] flex-shrink-0" />
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--its-red)] truncate">{preview.siteName}</span>
+                <div className="min-w-0 flex-1 pr-5">
+                  <div className="mb-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-[var(--its-red)]"><Film size={10} /> YouTube Short</div>
+                  <p className="text-sm font-bold leading-tight text-foreground">Vertical video preview</p>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Your post will show one clean short-video player.</p>
+                </div>
+              </a>
+            ) : (
+              <a href={preview.url} target="_blank" rel="noopener noreferrer" className="flex gap-0 hover:bg-secondary transition-colors no-underline" onClick={(e) => e.stopPropagation()}>
+                {preview.image && (
+                  <div className="w-28 flex-shrink-0 bg-secondary">
+                    <img src={preview.image} alt={preview.title ?? ""} className="w-full h-full object-cover" style={{ minHeight: "80px", maxHeight: "120px" }} onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                   </div>
                 )}
-                {preview.title && <p className="text-sm font-bold text-foreground leading-tight mb-1 line-clamp-2">{preview.title}</p>}
-                {preview.description && <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{preview.description}</p>}
-              </div>
-            </a>
+                <div className="flex-1 p-3 min-w-0">
+                  {preview.siteName && (
+                    <div className="flex items-center gap-1 mb-1">
+                      <Link2 size={10} className="text-[var(--its-red)] flex-shrink-0" />
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--its-red)] truncate">{preview.siteName}</span>
+                    </div>
+                  )}
+                  {preview.title && <p className="text-sm font-bold text-foreground leading-tight mb-1 line-clamp-2">{preview.title}</p>}
+                  {preview.description && <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{preview.description}</p>}
+                </div>
+              </a>
+            )
           ) : null}
           <button type="button" onClick={() => setPreviewDismissed(true)} className="absolute top-1.5 right-1.5 bg-primary text-primary-foreground p-0.5 hover:bg-[var(--its-red)] transition-colors">
             <X size={12} />
