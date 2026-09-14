@@ -49,6 +49,18 @@ function readableBytes(value: number | null) {
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function getYouTubeShortId(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    if ((hostname !== "youtube.com" && hostname !== "m.youtube.com") || !/^\/shorts\/[^/]+/i.test(parsed.pathname)) return null;
+    return parsed.pathname.split("/")[2]?.split("?")[0] || null;
+  } catch {
+    return null;
+  }
+}
+
 const GROUP_REACTIONS = [
   { type: "like", emoji: "👍", label: "Like", color: "#1877f2" },
   { type: "love", emoji: "❤️", label: "Love", color: "#f33e58" },
@@ -178,7 +190,10 @@ export default function GroupPostCard({
   const commentCount = commentData?.comments.length ?? initialCommentCount;
   const background = post.bgColor ?? "";
   const hasPreview = Boolean(post.linkUrl && (post.linkTitle || post.linkDescription || post.linkImage));
-  const isYouTubePreview = Boolean(post.linkUrl && /(^|\.)youtube\.com|(^|\.)youtu\.be/i.test(new URL(post.linkUrl).hostname));
+  const youtubeShortId = getYouTubeShortId(post.linkUrl);
+  const isYouTubePreview = Boolean(post.linkUrl && (() => {
+    try { return /(^|\.)youtube\.com|(^|\.)youtu\.be/i.test(new URL(post.linkUrl).hostname); } catch { return false; }
+  })());
   const textWithoutPreviewUrl = hasPreview ? post.content?.replace(post.linkUrl ?? "", "").trim() : post.content;
 
   return (
@@ -210,7 +225,21 @@ export default function GroupPostCard({
           <p className="text-sm leading-relaxed whitespace-pre-wrap break-words mb-3">{textWithoutPreviewUrl}</p>
         ) : null}
 
-        {hasPreview && post.linkUrl && (
+        {/* Shorts receive one true vertical player, not a stretched landscape thumbnail. */}
+        {youtubeShortId && (
+          <div className="mx-auto mb-3 w-full max-w-[420px] overflow-hidden rounded-lg border border-border bg-black" style={{ aspectRatio: "9 / 16" }}>
+            <iframe
+              src={`https://www.youtube.com/embed/${youtubeShortId}?rel=0&playsinline=1`}
+              title="YouTube Short"
+              className="h-full w-full border-0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+            />
+          </div>
+        )}
+
+        {/* Ordinary links and standard YouTube URLs keep their existing link-card presentation. */}
+        {hasPreview && post.linkUrl && !youtubeShortId && (
           <a href={post.linkUrl} target="_blank" rel="noopener noreferrer" className="block border border-border rounded-lg overflow-hidden mb-3 hover:border-primary/60 hover:bg-muted/40 transition-colors">
             {post.linkImage && !previewImageFailed ? (
               <img src={post.linkImage} alt="" className="w-full max-h-80 object-cover" onError={() => setPreviewImageFailed(true)} />
