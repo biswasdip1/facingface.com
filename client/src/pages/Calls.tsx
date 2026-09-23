@@ -24,7 +24,12 @@ import { toast } from "sonner";
 import { useLocation } from "wouter";
 
 function getInitials(name: string) {
-  return name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
+  return name
+    .split(" ")
+    .map(n => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
 }
 
 function formatDuration(seconds: number): string {
@@ -49,7 +54,13 @@ function formatRelativeTime(date: Date): string {
 type CallState =
   | { type: "idle" }
   | { type: "calling"; peerId: number; peerName: string; isVideo: boolean }
-  | { type: "incoming"; peerId: number; peerName: string; isVideo: boolean; offer: RTCSessionDescriptionInit }
+  | {
+      type: "incoming";
+      peerId: number;
+      peerName: string;
+      isVideo: boolean;
+      offer: RTCSessionDescriptionInit;
+    }
   | { type: "connected"; peerId: number; peerName: string; isVideo: boolean };
 
 const ICE_SERVERS = [
@@ -60,10 +71,11 @@ const ICE_SERVERS = [
 export default function Calls() {
   const { user } = useAuth();
   const [, navigate] = useLocation();
-  const { data: relayConfig, isLoading: relayConfigLoading } = trpc.calls.iceServers.useQuery(undefined, {
-    staleTime: 45 * 60 * 1000,
-    refetchOnWindowFocus: false,
-  });
+  const { data: relayConfig, isLoading: relayConfigLoading } =
+    trpc.calls.iceServers.useQuery(undefined, {
+      staleTime: 45 * 60 * 1000,
+      refetchOnWindowFocus: false,
+    });
   const [activeTab, setActiveTab] = useState<"friends" | "history">("friends");
   const [friendSearch, setFriendSearch] = useState("");
   const [callState, setCallState] = useState<CallState>({ type: "idle" });
@@ -84,7 +96,7 @@ export default function Calls() {
 
   const utils = trpc.useUtils();
   const { data: friends = [] } = trpc.friends.listEnriched.useQuery();
-  const filteredFriends = friends.filter((row) => {
+  const filteredFriends = friends.filter(row => {
     const name = String(row.friend?.name ?? "").toLowerCase();
     return name.includes(friendSearch.trim().toLowerCase());
   });
@@ -107,7 +119,12 @@ export default function Calls() {
   }, [activeTab, user]);
 
   const logCall = useCallback(
-    (peerId: number, type: "voice" | "video", status: "missed" | "answered" | "declined", duration = 0) => {
+    (
+      peerId: number,
+      type: "voice" | "video",
+      status: "missed" | "answered" | "declined",
+      duration = 0
+    ) => {
       if (!peerId) return;
       logCallMutation.mutate({
         calleeId: peerId,
@@ -127,10 +144,12 @@ export default function Calls() {
       callStartRef.current = Date.now();
       setCallDuration(0);
       durationTimerRef.current = setInterval(() => {
-        setCallDuration((d) => {
+        setCallDuration(d => {
           // AUTO-STOP AFTER 30 MINUTES (1800 seconds)
           if (d >= 1800) {
-            toast.warning("Call duration limit (30 minutes) reached. Ending call.");
+            toast.warning(
+              "Call duration limit (30 minutes) reached. Ending call."
+            );
             setTimeout(() => hangUp(), 500);
             return d;
           }
@@ -138,9 +157,14 @@ export default function Calls() {
         });
       }, 1000);
     } else {
-      if (durationTimerRef.current) { clearInterval(durationTimerRef.current); durationTimerRef.current = null; }
+      if (durationTimerRef.current) {
+        clearInterval(durationTimerRef.current);
+        durationTimerRef.current = null;
+      }
     }
-    return () => { if (durationTimerRef.current) clearInterval(durationTimerRef.current); };
+    return () => {
+      if (durationTimerRef.current) clearInterval(durationTimerRef.current);
+    };
   }, [callState.type]);
 
   // Auto-stop live stream after 30 minutes
@@ -150,10 +174,11 @@ export default function Calls() {
     }
   }, [callDuration, callState.type]);
 
-
   // Cleanup on unmount
   useEffect(() => {
-    return () => { hangUp(); };
+    return () => {
+      hangUp();
+    };
   }, []);
 
   const attachRemoteMedia = useCallback(() => {
@@ -169,80 +194,148 @@ export default function Calls() {
     }
   }, []);
 
-  const flushPendingIceCandidates = useCallback(async (pc: RTCPeerConnection) => {
-    if (!pc.remoteDescription) return;
-    for (const candidate of pendingIceCandidatesRef.current.splice(0)) {
-      try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
+  // getUserMedia completes before the in-call video elements render. Reattach
+  // the saved stream after the connected layout mounts so the caller's own
+  // camera never remains an empty preview on mobile browsers.
+  const attachLocalMedia = useCallback(() => {
+    const stream = localStreamRef.current;
+    if (
+      localVideoRef.current &&
+      stream &&
+      localVideoRef.current.srcObject !== stream
+    ) {
+      localVideoRef.current.srcObject = stream;
+      localVideoRef.current.play().catch(() => {});
     }
   }, []);
+
+  useEffect(() => {
+    if (callState.type !== "connected" || !callState.isVideo) return;
+    attachRemoteMedia();
+    attachLocalMedia();
+  }, [callState, attachRemoteMedia, attachLocalMedia]);
+
+  const flushPendingIceCandidates = useCallback(
+    async (pc: RTCPeerConnection) => {
+      if (!pc.remoteDescription) return;
+      for (const candidate of pendingIceCandidatesRef.current.splice(0)) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch {}
+      }
+    },
+    []
+  );
 
   // Socket.IO signalling
   useEffect(() => {
     if (!user) return;
-    import("socket.io-client").then(({ io }) => {
-      const socket = io(window.location.origin, {
-        path: "/api/socket.io",
-        query: { userId: user.id },
-      });
-      socketRef.current = socket;
+    import("socket.io-client")
+      .then(({ io }) => {
+        const socket = io(window.location.origin, {
+          path: "/api/socket.io",
+          query: { userId: user.id },
+        });
+        socketRef.current = socket;
 
-      socket.on("call:offer", async ({ from, fromName, offer, isVideo }: any) => {
-        setCallState({ type: "incoming", peerId: from, peerName: fromName, isVideo, offer });
-        toast.info(`Incoming ${isVideo ? "video" : "audio"} call from ${fromName}`);
-      });
+        socket.on(
+          "call:offer",
+          async ({ from, fromName, offer, isVideo }: any) => {
+            setCallState({
+              type: "incoming",
+              peerId: from,
+              peerName: fromName,
+              isVideo,
+              offer,
+            });
+            toast.info(
+              `Incoming ${isVideo ? "video" : "audio"} call from ${fromName}`
+            );
+          }
+        );
 
-      socket.on("call:answer", async ({ answer }: any) => {
-        if (!pcRef.current) return;
-        try {
-          await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
-          await flushPendingIceCandidates(pcRef.current);
-          setCallState((current) => current.type === "calling"
-            ? { type: "connected", peerId: current.peerId, peerName: current.peerName, isVideo: current.isVideo }
-            : current);
-        } catch {
-          toast.error("The call answer could not be connected.");
-        }
-      });
+        socket.on("call:answer", async ({ answer }: any) => {
+          if (!pcRef.current) return;
+          try {
+            await pcRef.current.setRemoteDescription(
+              new RTCSessionDescription(answer)
+            );
+            await flushPendingIceCandidates(pcRef.current);
+            setCallState(current =>
+              current.type === "calling"
+                ? {
+                    type: "connected",
+                    peerId: current.peerId,
+                    peerName: current.peerName,
+                    isVideo: current.isVideo,
+                  }
+                : current
+            );
+          } catch {
+            toast.error("The call answer could not be connected.");
+          }
+        });
 
-      socket.on("call:ice", async ({ candidate }: { candidate?: RTCIceCandidateInit }) => {
-        if (!candidate) return;
-        const pc = pcRef.current;
-        if (!pc || !pc.remoteDescription) {
-          pendingIceCandidatesRef.current.push(candidate);
-          return;
-        }
-        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
-      });
+        socket.on(
+          "call:ice",
+          async ({ candidate }: { candidate?: RTCIceCandidateInit }) => {
+            if (!candidate) return;
+            const pc = pcRef.current;
+            if (!pc || !pc.remoteDescription) {
+              pendingIceCandidatesRef.current.push(candidate);
+              return;
+            }
+            try {
+              await pc.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch {}
+          }
+        );
 
-      socket.on("call:hangup", () => {
-        toast.info("Call ended by the other person.");
-        hangUp();
-      });
+        socket.on("call:hangup", () => {
+          toast.info("Call ended by the other person.");
+          hangUp();
+        });
 
-      return () => { socket.disconnect(); };
-    }).catch(() => {});
+        return () => {
+          socket.disconnect();
+        };
+      })
+      .catch(() => {});
   }, [user]);
 
   function createPeerConnection(peerId: number) {
-    const iceServers = relayConfig?.iceServers?.length ? relayConfig.iceServers : ICE_SERVERS;
+    const iceServers = relayConfig?.iceServers?.length
+      ? relayConfig.iceServers
+      : ICE_SERVERS;
     const pc = new RTCPeerConnection({ iceServers });
     pcRef.current = pc;
 
-    pc.onicecandidate = (e) => {
+    pc.onicecandidate = e => {
       if (e.candidate && socketRef.current) {
-        socketRef.current.emit("call:ice", { to: peerId, candidate: e.candidate });
+        socketRef.current.emit("call:ice", {
+          to: peerId,
+          candidate: e.candidate,
+        });
       }
     };
 
-    pc.ontrack = (e) => {
-      const stream = e.streams[0] ?? remoteStreamRef.current ?? new MediaStream();
-      if (!e.streams[0] && !stream.getTracks().some((track) => track.id === e.track.id)) stream.addTrack(e.track);
+    pc.ontrack = e => {
+      const stream =
+        e.streams[0] ?? remoteStreamRef.current ?? new MediaStream();
+      if (
+        !e.streams[0] &&
+        !stream.getTracks().some(track => track.id === e.track.id)
+      )
+        stream.addTrack(e.track);
       remoteStreamRef.current = stream;
       attachRemoteMedia();
     };
 
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === "disconnected" || pc.connectionState === "failed") {
+      if (
+        pc.connectionState === "disconnected" ||
+        pc.connectionState === "failed"
+      ) {
         hangUp();
       }
     };
@@ -252,20 +345,27 @@ export default function Calls() {
 
   async function startCall(peerId: number, peerName: string, isVideo: boolean) {
     if (relayConfigLoading) {
-      toast.info("Preparing secure call connection. Please try again in a moment.");
+      toast.info(
+        "Preparing secure call connection. Please try again in a moment."
+      );
       return;
     }
     if (!socketRef.current) {
-      toast.error("Real-time connection not available. Please refresh the page.");
+      toast.error(
+        "Real-time connection not available. Please refresh the page."
+      );
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideo });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: isVideo,
+      });
       localStreamRef.current = stream;
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
       const pc = createPeerConnection(peerId);
-      stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+      stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -286,18 +386,23 @@ export default function Calls() {
 
   async function acceptCall() {
     if (relayConfigLoading) {
-      toast.info("Preparing secure call connection. Please tap Answer again in a moment.");
+      toast.info(
+        "Preparing secure call connection. Please tap Answer again in a moment."
+      );
       return;
     }
     if (callState.type !== "incoming") return;
     const { peerId, peerName, isVideo, offer } = callState;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: isVideo });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: isVideo,
+      });
       localStreamRef.current = stream;
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
       const pc = createPeerConnection(peerId);
-      stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+      stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       await flushPendingIceCandidates(pc);
@@ -323,7 +428,7 @@ export default function Calls() {
     }
     pcRef.current?.close();
     pcRef.current = null;
-    localStreamRef.current?.getTracks().forEach((t) => t.stop());
+    localStreamRef.current?.getTracks().forEach(t => t.stop());
     localStreamRef.current = null;
     pendingIceCandidatesRef.current = [];
     remoteStreamRef.current = null;
@@ -336,16 +441,21 @@ export default function Calls() {
   }
 
   function toggleMic() {
-    localStreamRef.current?.getAudioTracks().forEach((t) => { t.enabled = !t.enabled; });
-    setMicOn((v) => !v);
+    localStreamRef.current?.getAudioTracks().forEach(t => {
+      t.enabled = !t.enabled;
+    });
+    setMicOn(v => !v);
   }
 
   function toggleCam() {
-    localStreamRef.current?.getVideoTracks().forEach((t) => { t.enabled = !t.enabled; });
-    setCamOn((v) => !v);
+    localStreamRef.current?.getVideoTracks().forEach(t => {
+      t.enabled = !t.enabled;
+    });
+    setCamOn(v => !v);
   }
 
-  const isInCall = callState.type === "connected" || callState.type === "calling";
+  const isInCall =
+    callState.type === "connected" || callState.type === "calling";
   const showVideo = isInCall && (callState as any).isVideo;
   const historyRows = historyData?.rows ?? [];
 
@@ -353,242 +463,338 @@ export default function Calls() {
     <>
       <audio ref={remoteAudioRef} autoPlay playsInline className="sr-only" />
       <div className="max-w-4xl mx-auto py-8 px-4">
-      <div className="flex items-center gap-3 mb-6">
-        <PhoneCall className="w-7 h-7 text-primary" />
-        <h1 className="text-2xl font-bold">Calls</h1>
-      </div>
-
-      {/* Incoming call banner */}
-      {callState.type === "incoming" && (
-        <div className="mb-6 p-5 rounded-2xl bg-green-500/10 border border-green-500/30 flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-green-500/20 flex items-center justify-center animate-pulse">
-            <PhoneIncoming className="w-6 h-6 text-green-500" />
-          </div>
-          <div className="flex-1">
-            <p className="font-semibold">{callState.peerName}</p>
-            <p className="text-sm text-muted-foreground">
-              Incoming {callState.isVideo ? "video" : "audio"} call...
-            </p>
-          </div>
-          <Button className="bg-green-500 hover:bg-green-600 text-white" onClick={acceptCall}>
-            <Phone className="w-4 h-4 mr-2" /> Answer
-          </Button>
-          <Button variant="destructive" onClick={declineCall}>
-            <PhoneOff className="w-4 h-4 mr-2" /> Decline
-          </Button>
+        <div className="flex items-center gap-3 mb-6">
+          <PhoneCall className="w-7 h-7 text-primary" />
+          <h1 className="text-2xl font-bold">Calls</h1>
         </div>
-      )}
 
-      {/* Active call view */}
-      {isInCall && (
-        <div className="mb-6 rounded-2xl overflow-hidden bg-card border border-border">
-          {/* Duration badge */}
-          <div className="px-4 py-2 flex items-center justify-between bg-muted/40">
-            <span className="text-sm font-medium">{(callState as any).peerName}</span>
-            <span className="text-xs text-muted-foreground font-mono">
-              {callState.type === "calling" ? "Calling…" : formatDuration(callDuration)}
-            </span>
-          </div>
-
-          {showVideo ? (
-            <div className="relative bg-black aspect-video">
-              <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
-              <video ref={localVideoRef} autoPlay playsInline muted
-                className="absolute bottom-4 right-4 w-32 h-24 rounded-xl object-cover border-2 border-white/30" />
+        {/* Incoming call banner */}
+        {callState.type === "incoming" && (
+          <div className="mb-6 p-5 rounded-2xl bg-green-500/10 border border-green-500/30 flex items-center gap-4">
+            <div className="w-12 h-12 rounded-full bg-green-500/20 flex items-center justify-center animate-pulse">
+              <PhoneIncoming className="w-6 h-6 text-green-500" />
             </div>
-          ) : (
-            <div className="bg-muted/30 flex flex-col items-center justify-center py-16 gap-4">
-              <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
-                <Phone className="w-10 h-10 text-primary animate-pulse" />
-              </div>
-              <p className="text-lg font-semibold">{(callState as any).peerName}</p>
+            <div className="flex-1">
+              <p className="font-semibold">{callState.peerName}</p>
               <p className="text-sm text-muted-foreground">
-                {callState.type === "calling" ? "Calling…" : "Audio call in progress"}
+                Incoming {callState.isVideo ? "video" : "audio"} call...
               </p>
-              <video ref={remoteVideoRef} autoPlay playsInline className="hidden" />
-              <video ref={localVideoRef} autoPlay playsInline muted className="hidden" />
             </div>
-          )}
-
-          {/* Call controls */}
-          <div className="flex items-center justify-center gap-4 p-4 bg-card">
-            <Button variant={micOn ? "outline" : "destructive"} size="icon" className="w-12 h-12 rounded-full" onClick={toggleMic}>
-              {micOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
+            <Button
+              className="bg-green-500 hover:bg-green-600 text-white"
+              onClick={acceptCall}
+            >
+              <Phone className="w-4 h-4 mr-2" /> Answer
             </Button>
-            {showVideo && (
-              <Button variant={camOn ? "outline" : "destructive"} size="icon" className="w-12 h-12 rounded-full" onClick={toggleCam}>
-                {camOn ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
-              </Button>
-            )}
-            <Button variant="destructive" size="icon" className="w-14 h-14 rounded-full" onClick={hangUp}>
-              <PhoneOff className="w-6 h-6" />
+            <Button variant="destructive" onClick={declineCall}>
+              <PhoneOff className="w-4 h-4 mr-2" /> Decline
             </Button>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Tabs */}
-      <div className="flex gap-1 mb-5 bg-muted/40 rounded-xl p-1 w-fit">
-        <button
-          className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors flex items-center gap-1.5 ${
-            activeTab === "friends" ? "bg-card shadow text-foreground" : "text-muted-foreground hover:text-foreground"
-          }`}
-          onClick={() => setActiveTab("friends")}
-        >
-          <Users className="w-4 h-4" /> Friends
-        </button>
-        <button
-          className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors flex items-center gap-1.5 ${
-            activeTab === "history" ? "bg-card shadow text-foreground" : "text-muted-foreground hover:text-foreground"
-          }`}
-          onClick={() => setActiveTab("history")}
-        >
-          <History className="w-4 h-4" /> History
-        </button>
-      </div>
+        {/* Active call view */}
+        {isInCall && (
+          <div className="mb-6 rounded-2xl overflow-hidden bg-card border border-border">
+            {/* Duration badge */}
+            <div className="px-4 py-2 flex items-center justify-between bg-muted/40">
+              <span className="text-sm font-medium">
+                {(callState as any).peerName}
+              </span>
+              <span className="text-xs text-muted-foreground font-mono">
+                {callState.type === "calling"
+                  ? "Calling…"
+                  : formatDuration(callDuration)}
+              </span>
+            </div>
 
-      {/* Friends tab */}
-      {activeTab === "friends" && (
-        <>
-          <div className="mb-4 rounded-2xl border bg-card p-3 sm:p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="font-bold">Find a friend to call</p>
-                <p className="text-xs text-muted-foreground">Search your accepted friends, then choose voice or video.</p>
-              </div>
-              <div className="relative w-full sm:max-w-sm">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={friendSearch}
-                  onChange={(event) => setFriendSearch(event.target.value)}
-                  placeholder="Search friends by name..."
-                  className="h-10 rounded-full pl-9 pr-9"
-                  aria-label="Find a friend to call"
+            {showVideo ? (
+              <div className="relative bg-black aspect-video">
+                <video
+                  ref={remoteVideoRef}
+                  autoPlay
+                  playsInline
+                  className="w-full h-full object-cover"
                 />
-                {friendSearch && (
-                  <button type="button" onClick={() => setFriendSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-muted-foreground hover:bg-muted" aria-label="Clear friend search">
-                    <X className="h-4 w-4" />
-                  </button>
-                )}
+                <video
+                  ref={localVideoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="absolute bottom-4 right-4 w-32 h-24 rounded-xl object-cover border-2 border-white/30"
+                />
               </div>
+            ) : (
+              <div className="bg-muted/30 flex flex-col items-center justify-center py-16 gap-4">
+                <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Phone className="w-10 h-10 text-primary animate-pulse" />
+                </div>
+                <p className="text-lg font-semibold">
+                  {(callState as any).peerName}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {callState.type === "calling"
+                    ? "Calling…"
+                    : "Audio call in progress"}
+                </p>
+                <video
+                  ref={remoteVideoRef}
+                  autoPlay
+                  playsInline
+                  className="hidden"
+                />
+                <video
+                  ref={localVideoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="hidden"
+                />
+              </div>
+            )}
+
+            {/* Call controls */}
+            <div className="flex items-center justify-center gap-4 p-4 bg-card">
+              <Button
+                variant={micOn ? "outline" : "destructive"}
+                size="icon"
+                className="w-12 h-12 rounded-full"
+                onClick={toggleMic}
+              >
+                {micOn ? (
+                  <Mic className="w-5 h-5" />
+                ) : (
+                  <MicOff className="w-5 h-5" />
+                )}
+              </Button>
+              {showVideo && (
+                <Button
+                  variant={camOn ? "outline" : "destructive"}
+                  size="icon"
+                  className="w-12 h-12 rounded-full"
+                  onClick={toggleCam}
+                >
+                  {camOn ? (
+                    <Video className="w-5 h-5" />
+                  ) : (
+                    <VideoOff className="w-5 h-5" />
+                  )}
+                </Button>
+              )}
+              <Button
+                variant="destructive"
+                size="icon"
+                className="w-14 h-14 rounded-full"
+                onClick={hangUp}
+              >
+                <PhoneOff className="w-6 h-6" />
+              </Button>
             </div>
           </div>
-          {friends.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <Users className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p>Add friends first to start a call.</p>
-            </div>
-          ) : filteredFriends.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <Search className="w-10 h-10 mx-auto mb-3 opacity-30" />
-              <p>No friends match “{friendSearch}”.</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {filteredFriends.map((row) => {
-                const friend = row.friend;
-                if (!friend) return null;
-                return (
-                  <FriendCallRow
-                    key={row.id}
-                    friend={friend}
-                    disabled={callState.type !== "idle" || relayConfigLoading}
-                    onOpenProfile={() => navigate(`/profile/${friend.id}`)}
-                    onAudioCall={(name) => startCall(friend.id, name, false)}
-                    onVideoCall={(name) => startCall(friend.id, name, true)}
+        )}
+
+        {/* Tabs */}
+        <div className="flex gap-1 mb-5 bg-muted/40 rounded-xl p-1 w-fit">
+          <button
+            className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors flex items-center gap-1.5 ${
+              activeTab === "friends"
+                ? "bg-card shadow text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={() => setActiveTab("friends")}
+          >
+            <Users className="w-4 h-4" /> Friends
+          </button>
+          <button
+            className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors flex items-center gap-1.5 ${
+              activeTab === "history"
+                ? "bg-card shadow text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={() => setActiveTab("history")}
+          >
+            <History className="w-4 h-4" /> History
+          </button>
+        </div>
+
+        {/* Friends tab */}
+        {activeTab === "friends" && (
+          <>
+            <div className="mb-4 rounded-2xl border bg-card p-3 sm:p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="font-bold">Find a friend to call</p>
+                  <p className="text-xs text-muted-foreground">
+                    Search your accepted friends, then choose voice or video.
+                  </p>
+                </div>
+                <div className="relative w-full sm:max-w-sm">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={friendSearch}
+                    onChange={event => setFriendSearch(event.target.value)}
+                    placeholder="Search friends by name..."
+                    className="h-10 rounded-full pl-9 pr-9"
+                    aria-label="Find a friend to call"
                   />
-                );
-              })}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* History tab */}
-      {activeTab === "history" && (
-        <>
-          {historyRows.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <History className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p>No call history yet.</p>
-            </div>
-          ) : (
-            <ScrollArea className="max-h-[60vh]">
-              <div className="space-y-2 pr-2">
-                {historyRows.map((row: { id: number; callerId: number; calleeId: number; type: string; status: string; startedAt: Date; endedAt: Date | null; duration: number; peerName: string | null; peerAvatar: string | null; peerId: number }) => {
-                  const isMissed = row.status === "missed";
-                  const isOutgoing = row.callerId === user?.id;
-                  const peerId = row.peerId;
-                  const peerName = row.peerName ?? "Unknown";
-                  const peerAvatar = row.peerAvatar;
-
-                  return (
-                    <div
-                      key={row.id}
-                      className={`flex items-center gap-4 p-3 rounded-xl border bg-card transition-colors ${
-                        isMissed ? "border-red-500/30 bg-red-500/5" : "border-border hover:bg-muted/30"
-                      }`}
+                  {friendSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setFriendSearch("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-muted-foreground hover:bg-muted"
+                      aria-label="Clear friend search"
                     >
-                      <Avatar className="w-10 h-10 flex-shrink-0">
-                        <AvatarImage src={peerAvatar ?? undefined} />
-                        <AvatarFallback>{getInitials(peerName)}</AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="font-semibold text-sm truncate">{peerName}</p>
-                          {row.type === "video" ? (
-                            <Video className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                          ) : (
-                            <Phone className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          {isMissed ? (
-                            <span className="flex items-center gap-1 text-xs text-red-500 font-medium">
-                              <PhoneMissed className="w-3 h-3" /> Missed
-                            </span>
-                          ) : (
-                            <span className={`text-xs font-medium ${isOutgoing ? "text-blue-500" : "text-green-500"}`}>
-                              {isOutgoing ? "Outgoing" : "Incoming"}
-                            </span>
-                          )}
-                          {row.duration > 0 && (
-                            <span className="text-xs text-muted-foreground">· {formatDuration(row.duration)}</span>
-                          )}
-                          <span className="text-xs text-muted-foreground">· {formatRelativeTime(row.startedAt)}</span>
-                        </div>
-                      </div>
-                      {/* Call-back buttons */}
-                      <div className="flex gap-1.5 flex-shrink-0">
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          className="w-8 h-8 rounded-full"
-                          disabled={callState.type !== "idle" || relayConfigLoading}
-                          title="Call back (voice)"
-                          onClick={() => startCall(peerId, peerName, false)}
-                        >
-                          <Phone className="w-3.5 h-3.5" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          className="w-8 h-8 rounded-full"
-                          disabled={callState.type !== "idle" || relayConfigLoading}
-                          title="Call back (video)"
-                          onClick={() => startCall(peerId, peerName, true)}
-                        >
-                          <Video className="w-3.5 h-3.5" />
-                        </Button>
-                      </div>
-                    </div>
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+            {friends.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <Users className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                <p>Add friends first to start a call.</p>
+              </div>
+            ) : filteredFriends.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <Search className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                <p>No friends match “{friendSearch}”.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {filteredFriends.map(row => {
+                  const friend = row.friend;
+                  if (!friend) return null;
+                  return (
+                    <FriendCallRow
+                      key={row.id}
+                      friend={friend}
+                      disabled={callState.type !== "idle" || relayConfigLoading}
+                      onOpenProfile={() => navigate(`/profile/${friend.id}`)}
+                      onAudioCall={name => startCall(friend.id, name, false)}
+                      onVideoCall={name => startCall(friend.id, name, true)}
+                    />
                   );
                 })}
               </div>
-            </ScrollArea>
-          )}
-        </>
-      )}
+            )}
+          </>
+        )}
+
+        {/* History tab */}
+        {activeTab === "history" && (
+          <>
+            {historyRows.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <History className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                <p>No call history yet.</p>
+              </div>
+            ) : (
+              <ScrollArea className="max-h-[60vh]">
+                <div className="space-y-2 pr-2">
+                  {historyRows.map(
+                    (row: {
+                      id: number;
+                      callerId: number;
+                      calleeId: number;
+                      type: string;
+                      status: string;
+                      startedAt: Date;
+                      endedAt: Date | null;
+                      duration: number;
+                      peerName: string | null;
+                      peerAvatar: string | null;
+                      peerId: number;
+                    }) => {
+                      const isMissed = row.status === "missed";
+                      const isOutgoing = row.callerId === user?.id;
+                      const peerId = row.peerId;
+                      const peerName = row.peerName ?? "Unknown";
+                      const peerAvatar = row.peerAvatar;
+
+                      return (
+                        <div
+                          key={row.id}
+                          className={`flex items-center gap-4 p-3 rounded-xl border bg-card transition-colors ${
+                            isMissed
+                              ? "border-red-500/30 bg-red-500/5"
+                              : "border-border hover:bg-muted/30"
+                          }`}
+                        >
+                          <Avatar className="w-10 h-10 flex-shrink-0">
+                            <AvatarImage src={peerAvatar ?? undefined} />
+                            <AvatarFallback>
+                              {getInitials(peerName)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="font-semibold text-sm truncate">
+                                {peerName}
+                              </p>
+                              {row.type === "video" ? (
+                                <Video className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                              ) : (
+                                <Phone className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              {isMissed ? (
+                                <span className="flex items-center gap-1 text-xs text-red-500 font-medium">
+                                  <PhoneMissed className="w-3 h-3" /> Missed
+                                </span>
+                              ) : (
+                                <span
+                                  className={`text-xs font-medium ${isOutgoing ? "text-blue-500" : "text-green-500"}`}
+                                >
+                                  {isOutgoing ? "Outgoing" : "Incoming"}
+                                </span>
+                              )}
+                              {row.duration > 0 && (
+                                <span className="text-xs text-muted-foreground">
+                                  · {formatDuration(row.duration)}
+                                </span>
+                              )}
+                              <span className="text-xs text-muted-foreground">
+                                · {formatRelativeTime(row.startedAt)}
+                              </span>
+                            </div>
+                          </div>
+                          {/* Call-back buttons */}
+                          <div className="flex gap-1.5 flex-shrink-0">
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="w-8 h-8 rounded-full"
+                              disabled={
+                                callState.type !== "idle" || relayConfigLoading
+                              }
+                              title="Call back (voice)"
+                              onClick={() => startCall(peerId, peerName, false)}
+                            >
+                              <Phone className="w-3.5 h-3.5" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="w-8 h-8 rounded-full"
+                              disabled={
+                                callState.type !== "idle" || relayConfigLoading
+                              }
+                              title="Call back (video)"
+                              onClick={() => startCall(peerId, peerName, true)}
+                            >
+                              <Video className="w-3.5 h-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    }
+                  )}
+                </div>
+              </ScrollArea>
+            )}
+          </>
+        )}
       </div>
     </>
   );
@@ -601,7 +807,12 @@ function FriendCallRow({
   onAudioCall,
   onVideoCall,
 }: {
-  friend: { id: number; name: string | null; avatar: string | null; isVerified?: boolean | null };
+  friend: {
+    id: number;
+    name: string | null;
+    avatar: string | null;
+    isVerified?: boolean | null;
+  };
   disabled: boolean;
   onOpenProfile: () => void;
   onAudioCall: (name: string) => void;
@@ -611,22 +822,50 @@ function FriendCallRow({
 
   return (
     <div className="flex items-center gap-3 rounded-2xl border border-border bg-card p-3 transition-colors hover:bg-muted/30 sm:gap-4">
-      <button type="button" onClick={onOpenProfile} className="shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" title={`Open ${name}'s profile`}>
+      <button
+        type="button"
+        onClick={onOpenProfile}
+        className="shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        title={`Open ${name}'s profile`}
+      >
         <Avatar className="w-10 h-10">
           <AvatarImage src={friend.avatar ?? undefined} />
           <AvatarFallback>{getInitials(name)}</AvatarFallback>
         </Avatar>
       </button>
-      <button type="button" onClick={onOpenProfile} className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:underline" title={`Open ${name}'s profile`}>
+      <button
+        type="button"
+        onClick={onOpenProfile}
+        className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:underline"
+        title={`Open ${name}'s profile`}
+      >
         <p className="truncate text-sm font-semibold">{name}</p>
-        <p className="text-xs text-muted-foreground">Friend · tap to view profile</p>
+        <p className="text-xs text-muted-foreground">
+          Friend · tap to view profile
+        </p>
       </button>
       <div className="flex shrink-0 gap-1.5 sm:gap-2">
-        <Button variant="outline" size="sm" disabled={disabled} onClick={() => onAudioCall(name)} title={`Voice call ${name}`} className="px-2.5 sm:px-3">
-          <Phone className="w-4 h-4 sm:mr-1" /><span className="hidden sm:inline">Call</span>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          onClick={() => onAudioCall(name)}
+          title={`Voice call ${name}`}
+          className="px-2.5 sm:px-3"
+        >
+          <Phone className="w-4 h-4 sm:mr-1" />
+          <span className="hidden sm:inline">Call</span>
         </Button>
-        <Button variant="outline" size="sm" disabled={disabled} onClick={() => onVideoCall(name)} title={`Video call ${name}`} className="px-2.5 sm:px-3">
-          <Video className="w-4 h-4 sm:mr-1" /><span className="hidden sm:inline">Video</span>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          onClick={() => onVideoCall(name)}
+          title={`Video call ${name}`}
+          className="px-2.5 sm:px-3"
+        >
+          <Video className="w-4 h-4 sm:mr-1" />
+          <span className="hidden sm:inline">Video</span>
         </Button>
       </div>
     </div>

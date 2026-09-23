@@ -28,6 +28,8 @@ import {
   PhoneMissed,
   ScreenShare,
   ScreenShareOff,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -42,7 +44,7 @@ const ICE_SERVERS = [
 function getInitials(name: string) {
   return name
     .split(" ")
-    .map((n) => n[0])
+    .map(n => n[0])
     .join("")
     .toUpperCase()
     .slice(0, 2);
@@ -78,15 +80,20 @@ export default function CallModal({
   socketRef: externalSocketRef,
 }: CallModalProps) {
   const { user } = useAuth();
-  const { data: relayConfig, isLoading: relayConfigLoading } = trpc.calls.iceServers.useQuery(undefined, {
-    staleTime: 45 * 60 * 1000,
-    refetchOnWindowFocus: false,
-  });
-  const [phase, setPhase] = useState<CallPhase>(incomingOffer ? "incoming" : "calling");
+  const { data: relayConfig, isLoading: relayConfigLoading } =
+    trpc.calls.iceServers.useQuery(undefined, {
+      staleTime: 45 * 60 * 1000,
+      refetchOnWindowFocus: false,
+    });
+  const [phase, setPhase] = useState<CallPhase>(
+    incomingOffer ? "incoming" : "calling"
+  );
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   const [callDuration, setCallDuration] = useState(0);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [isSelfViewFocused, setIsSelfViewFocused] = useState(false);
+  const [isVideoExpanded, setIsVideoExpanded] = useState(false);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -100,9 +107,13 @@ export default function CallModal({
   const cameraVideoTrackRef = useRef<MediaStreamTrack | null>(null);
   const internalSocketRef = useRef<any>(null);
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const connectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
   const ringtoneContextRef = useRef<AudioContext | null>(null);
-  const ringtoneIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const ringtoneIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null
+  );
   const isMountedRef = useRef(true);
 
   const stopRingtone = useCallback(() => {
@@ -121,7 +132,10 @@ export default function CallModal({
     if (ringtoneIntervalRef.current || typeof window === "undefined") return;
 
     try {
-      const AudioContextConstructor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      const AudioContextConstructor =
+        window.AudioContext ||
+        (window as typeof window & { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
       if (!AudioContextConstructor) return;
 
       const context = new AudioContextConstructor();
@@ -130,7 +144,7 @@ export default function CallModal({
 
       const playRing = () => {
         const now = context.currentTime;
-        [0, 0.24].forEach((offset) => {
+        [0, 0.24].forEach(offset => {
           const oscillator = context.createOscillator();
           const gain = context.createGain();
           oscillator.type = "sine";
@@ -169,18 +183,37 @@ export default function CallModal({
     }
   }, []);
 
-  const flushPendingIceCandidates = useCallback(async (pc: RTCPeerConnection) => {
-    if (!pc.remoteDescription) return;
-    const candidates = pendingIceCandidatesRef.current.splice(0);
-    for (const candidate of candidates) {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
-      } catch {
-        // A duplicate or expired candidate is safe to ignore; later candidates
-        // can still establish the media route.
-      }
+  // The camera is requested before the connected panel is rendered. On mobile,
+  // that previously meant localVideoRef was still null and the self-view stayed
+  // as an empty outlined box for the whole call. Keep the stream and attach it
+  // again once the actual video element exists.
+  const attachLocalMedia = useCallback(() => {
+    const stream = screenStreamRef.current ?? localStreamRef.current;
+    if (
+      localVideoRef.current &&
+      stream &&
+      localVideoRef.current.srcObject !== stream
+    ) {
+      localVideoRef.current.srcObject = stream;
+      localVideoRef.current.play().catch(() => {});
     }
   }, []);
+
+  const flushPendingIceCandidates = useCallback(
+    async (pc: RTCPeerConnection) => {
+      if (!pc.remoteDescription) return;
+      const candidates = pendingIceCandidatesRef.current.splice(0);
+      for (const candidate of candidates) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch {
+          // A duplicate or expired candidate is safe to ignore; later candidates
+          // can still establish the media route.
+        }
+      }
+    },
+    []
+  );
 
   // Candidate packets can arrive directly after an offer, before React has
   // mounted this dialog. Keep the parent's buffered candidates exactly once.
@@ -226,17 +259,27 @@ export default function CallModal({
     let attachedSocket: any = null;
     let checkSocket: ReturnType<typeof setInterval> | null = null;
 
-    const handleAnswer = async ({ answer }: { answer: RTCSessionDescriptionInit }) => {
+    const handleAnswer = async ({
+      answer,
+    }: {
+      answer: RTCSessionDescriptionInit;
+    }) => {
       if (!isMountedRef.current || !pcRef.current) return;
       try {
-        await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+        await pcRef.current.setRemoteDescription(
+          new RTCSessionDescription(answer)
+        );
         await flushPendingIceCandidates(pcRef.current);
         if (isMountedRef.current) setPhase("connecting");
       } catch {
         toast.error("The call answer could not be connected.");
       }
     };
-    const handleIce = async ({ candidate }: { candidate: RTCIceCandidateInit }) => {
+    const handleIce = async ({
+      candidate,
+    }: {
+      candidate: RTCIceCandidateInit;
+    }) => {
       if (!isMountedRef.current || !candidate) return;
       const pc = pcRef.current;
       if (!pc || !pc.remoteDescription) {
@@ -307,30 +350,40 @@ export default function CallModal({
     return () => stopRingtone();
   }, [phase, startRingtone, stopRingtone]);
 
-  // A remote track can arrive before the connected UI mounts. Reattach the
-  // retained stream when the visible call panel becomes available.
+  // Media tracks can arrive before the connected UI mounts. Reattach the
+  // retained remote and local streams when the visible call panel is available.
   useEffect(() => {
-    if (phase === "connected") attachRemoteMedia();
-  }, [phase, isVideo, attachRemoteMedia]);
+    if (phase !== "connected") return;
+    attachRemoteMedia();
+    attachLocalMedia();
+  }, [phase, isVideo, attachRemoteMedia, attachLocalMedia]);
 
   // Do not leave a person on a silent Connecting screen forever when their
   // current network blocks direct WebRTC and no TURN relay is configured.
   useEffect(() => {
     if (phase !== "connecting") {
-      if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
+      if (connectionTimeoutRef.current)
+        clearTimeout(connectionTimeoutRef.current);
       connectionTimeoutRef.current = null;
       return;
     }
     connectionTimeoutRef.current = setTimeout(() => {
-      if (!isMountedRef.current || pcRef.current?.connectionState === "connected") return;
-      toast.error(relayConfig?.relayConfigured
-        ? "The call could not establish media. Please try again."
-        : "The call could not connect on this network. A TURN relay is required for reliable calls.");
+      if (
+        !isMountedRef.current ||
+        pcRef.current?.connectionState === "connected"
+      )
+        return;
+      toast.error(
+        relayConfig?.relayConfigured
+          ? "The call could not establish media. Please try again."
+          : "The call could not connect on this network. A TURN relay is required for reliable calls."
+      );
       cleanup();
       onClose();
     }, 25_000);
     return () => {
-      if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
+      if (connectionTimeoutRef.current)
+        clearTimeout(connectionTimeoutRef.current);
       connectionTimeoutRef.current = null;
     };
   }, [phase, relayConfig?.relayConfigured, onClose]);
@@ -339,7 +392,7 @@ export default function CallModal({
   useEffect(() => {
     if (phase === "connected") {
       durationTimerRef.current = setInterval(() => {
-        setCallDuration((d) => d + 1);
+        setCallDuration(d => d + 1);
       }, 1000);
     } else {
       if (durationTimerRef.current) {
@@ -361,19 +414,25 @@ export default function CallModal({
   }, []);
 
   function createPeerConnection() {
-    const iceServers = relayConfig?.iceServers?.length ? relayConfig.iceServers : ICE_SERVERS;
+    const iceServers = relayConfig?.iceServers?.length
+      ? relayConfig.iceServers
+      : ICE_SERVERS;
     const pc = new RTCPeerConnection({ iceServers });
     pcRef.current = pc;
 
-    pc.onicecandidate = (e) => {
+    pc.onicecandidate = e => {
       if (e.candidate) {
         getSocket()?.emit("call:ice", { to: peerId, candidate: e.candidate });
       }
     };
 
-    pc.ontrack = (e) => {
-      const stream = e.streams[0] ?? remoteStreamRef.current ?? new MediaStream();
-      if (!e.streams[0] && !stream.getTracks().some((track) => track.id === e.track.id)) {
+    pc.ontrack = e => {
+      const stream =
+        e.streams[0] ?? remoteStreamRef.current ?? new MediaStream();
+      if (
+        !e.streams[0] &&
+        !stream.getTracks().some(track => track.id === e.track.id)
+      ) {
         stream.addTrack(e.track);
       }
       remoteStreamRef.current = stream;
@@ -416,7 +475,7 @@ export default function CallModal({
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
       const pc = createPeerConnection();
-      stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+      stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -431,14 +490,19 @@ export default function CallModal({
 
       if (isMountedRef.current) setPhase("calling");
     } catch (err: any) {
-      toast.error("Could not access camera/microphone: " + (err.message ?? "Unknown error"));
+      toast.error(
+        "Could not access camera/microphone: " +
+          (err.message ?? "Unknown error")
+      );
       onClose();
     }
   }
 
   async function acceptIncomingCall() {
     if (relayConfigLoading) {
-      toast.info("Preparing secure call connection. Please tap Accept again in a moment.");
+      toast.info(
+        "Preparing secure call connection. Please tap Accept again in a moment."
+      );
       return;
     }
     if (!incomingOffer) return;
@@ -452,7 +516,7 @@ export default function CallModal({
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
       const pc = createPeerConnection();
-      stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+      stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
       await pc.setRemoteDescription(new RTCSessionDescription(incomingOffer));
       await flushPendingIceCandidates(pc);
@@ -485,13 +549,14 @@ export default function CallModal({
     stopRingtone();
     pcRef.current?.close();
     pcRef.current = null;
-    screenStreamRef.current?.getTracks().forEach((t) => t.stop());
+    screenStreamRef.current?.getTracks().forEach(t => t.stop());
     screenStreamRef.current = null;
     cameraVideoTrackRef.current = null;
     setIsScreenSharing(false);
-    localStreamRef.current?.getTracks().forEach((t) => t.stop());
+    localStreamRef.current?.getTracks().forEach(t => t.stop());
     localStreamRef.current = null;
-    if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
+    if (connectionTimeoutRef.current)
+      clearTimeout(connectionTimeoutRef.current);
     connectionTimeoutRef.current = null;
     pendingIceCandidatesRef.current = [];
     queuedIncomingCandidateKeysRef.current.clear();
@@ -499,38 +564,44 @@ export default function CallModal({
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+    setIsSelfViewFocused(false);
+    setIsVideoExpanded(false);
   }
 
   function toggleMic() {
     const stream = localStreamRef.current;
     if (!stream) return;
-    stream.getAudioTracks().forEach((t) => (t.enabled = !micOn));
-    setMicOn((v) => !v);
+    stream.getAudioTracks().forEach(t => (t.enabled = !micOn));
+    setMicOn(v => !v);
   }
 
   function toggleCam() {
     const stream = localStreamRef.current;
     if (!stream) return;
-    stream.getVideoTracks().forEach((t) => (t.enabled = !camOn));
-    setCamOn((v) => !v);
+    stream.getVideoTracks().forEach(t => (t.enabled = !camOn));
+    setCamOn(v => !v);
   }
 
   async function replaceOutgoingVideoTrack(track: MediaStreamTrack | null) {
     const pc = pcRef.current;
     if (!pc || !track) return false;
-    const sender = pc.getSenders().find((s) => s.track?.kind === "video");
+    const sender = pc.getSenders().find(s => s.track?.kind === "video");
     if (!sender) return false;
     await sender.replaceTrack(track);
     return true;
   }
 
   async function stopScreenShare() {
-    const cameraTrack = cameraVideoTrackRef.current ?? localStreamRef.current?.getVideoTracks()[0] ?? null;
+    const cameraTrack =
+      cameraVideoTrackRef.current ??
+      localStreamRef.current?.getVideoTracks()[0] ??
+      null;
     try {
       await replaceOutgoingVideoTrack(cameraTrack);
-      if (localVideoRef.current && localStreamRef.current) localVideoRef.current.srcObject = localStreamRef.current;
+      if (localVideoRef.current && localStreamRef.current)
+        localVideoRef.current.srcObject = localStreamRef.current;
     } catch {}
-    screenStreamRef.current?.getTracks().forEach((track) => track.stop());
+    screenStreamRef.current?.getTracks().forEach(track => track.stop());
     screenStreamRef.current = null;
     setIsScreenSharing(false);
   }
@@ -546,13 +617,18 @@ export default function CallModal({
       return;
     }
     try {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false,
+      });
       const screenTrack = screenStream.getVideoTracks()[0];
       if (!screenTrack) return;
       const replaced = await replaceOutgoingVideoTrack(screenTrack);
       if (!replaced) {
-        screenStream.getTracks().forEach((track) => track.stop());
-        toast.error("Screen sharing is available after the video connection starts.");
+        screenStream.getTracks().forEach(track => track.stop());
+        toast.error(
+          "Screen sharing is available after the video connection starts."
+        );
         return;
       }
       screenStreamRef.current = screenStream;
@@ -561,12 +637,15 @@ export default function CallModal({
       screenTrack.onended = () => stopScreenShare();
       toast.success("Screen sharing started.");
     } catch (err: any) {
-      if (err?.name !== "NotAllowedError") toast.error("Could not start screen sharing.");
+      if (err?.name !== "NotAllowedError")
+        toast.error("Could not start screen sharing.");
     }
   }
 
   function formatDuration(secs: number) {
-    const m = Math.floor(secs / 60).toString().padStart(2, "0");
+    const m = Math.floor(secs / 60)
+      .toString()
+      .padStart(2, "0");
     const s = (secs % 60).toString().padStart(2, "0");
     return `${m}:${s}`;
   }
@@ -579,15 +658,20 @@ export default function CallModal({
       <div
         className={cn(
           "relative bg-gray-900 text-white rounded-2xl shadow-2xl overflow-hidden flex flex-col",
-          isVideo && phase === "connected"
-            ? "w-full max-w-2xl"
-            : "w-full max-w-sm"
+          isVideo && phase === "connected" && isVideoExpanded
+            ? "w-full h-[100dvh] max-w-none rounded-none"
+            : isVideo && phase === "connected"
+              ? "w-full max-w-2xl"
+              : "w-full max-w-sm"
         )}
       >
         {/* ── Incoming call screen ── */}
         {phase === "incoming" && (
           <div className="flex flex-col items-center gap-6 p-10">
-            <p className="text-sm text-gray-400 uppercase tracking-widest" aria-live="assertive">
+            <p
+              className="text-sm text-gray-400 uppercase tracking-widest"
+              aria-live="assertive"
+            >
               Incoming {isVideo ? "Video" : "Voice"} Call · Ringing
             </p>
             <Avatar className="w-24 h-24 ring-4 ring-green-500/50">
@@ -611,7 +695,11 @@ export default function CallModal({
                 onClick={acceptIncomingCall}
                 disabled={relayConfigLoading}
                 className="flex flex-col items-center gap-2 group disabled:opacity-60"
-                title={relayConfigLoading ? "Preparing secure call connection" : "Accept call"}
+                title={
+                  relayConfigLoading
+                    ? "Preparing secure call connection"
+                    : "Accept call"
+                }
               >
                 <div className="w-16 h-16 rounded-full bg-green-600 flex items-center justify-center group-hover:bg-green-700 transition-colors">
                   <Phone className="w-7 h-7" />
@@ -639,7 +727,9 @@ export default function CallModal({
             </div>
             <p className="text-2xl font-bold">{peerName}</p>
             <p className="text-gray-300 animate-pulse" aria-live="polite">
-              {phase === "calling" ? `Ringing… Waiting for ${peerName} to answer` : "Connecting audio and video…"}
+              {phase === "calling"
+                ? `Ringing… Waiting for ${peerName} to answer`
+                : "Connecting audio and video…"}
             </p>
             <button
               onClick={hangUp}
@@ -655,25 +745,98 @@ export default function CallModal({
           <>
             {isVideo ? (
               /* Video call */
-              <div className="relative bg-black aspect-video">
-                <video
-                  ref={remoteVideoRef}
-                  autoPlay
-                  playsInline
-                  className="w-full h-full object-cover"
-                />
-                {/* Local PiP */}
-                <video
-                  ref={localVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="absolute bottom-4 right-4 w-32 h-24 rounded-xl object-cover border-2 border-white/30"
-                />
+              <div
+                className={cn(
+                  "relative bg-black",
+                  isVideoExpanded ? "flex-1 min-h-0" : "aspect-video"
+                )}
+              >
+                {/* The large panel is the person currently in focus. Tap the
+                    small panel to swap focus; both videos remain visible. */}
+                <button
+                  type="button"
+                  tabIndex={isSelfViewFocused ? 0 : -1}
+                  aria-label={`Show ${peerName} full size`}
+                  onClick={() =>
+                    isSelfViewFocused && setIsSelfViewFocused(false)
+                  }
+                  className={cn(
+                    "absolute overflow-hidden p-0 text-left appearance-none",
+                    isSelfViewFocused
+                      ? "bottom-4 right-4 z-20 w-28 h-20 sm:w-36 sm:h-28 rounded-xl border-2 border-white/70 shadow-xl cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                      : "inset-0 w-full h-full pointer-events-none"
+                  )}
+                >
+                  <video
+                    ref={remoteVideoRef}
+                    autoPlay
+                    playsInline
+                    className="w-full h-full object-cover"
+                  />
+                  {isSelfViewFocused && (
+                    <span className="absolute bottom-1 left-1 rounded bg-black/65 px-1.5 py-0.5 text-[11px] font-medium">
+                      {peerName}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  tabIndex={isSelfViewFocused ? -1 : 0}
+                  aria-label="Show your camera full size"
+                  onClick={() =>
+                    !isSelfViewFocused && setIsSelfViewFocused(true)
+                  }
+                  className={cn(
+                    "absolute overflow-hidden p-0 text-left appearance-none",
+                    isSelfViewFocused
+                      ? "inset-0 w-full h-full pointer-events-none"
+                      : "bottom-4 right-4 z-20 w-28 h-20 sm:w-36 sm:h-28 rounded-xl border-2 border-white/70 shadow-xl cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                  )}
+                >
+                  <video
+                    ref={localVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover"
+                  />
+                  {!isSelfViewFocused && (
+                    <span className="absolute bottom-1 left-1 rounded bg-black/65 px-1.5 py-0.5 text-[11px] font-medium">
+                      {isScreenSharing
+                        ? "You · Sharing"
+                        : camOn
+                          ? "You"
+                          : "You · Camera off"}
+                    </span>
+                  )}
+                </button>
+
                 {/* Name + duration overlay */}
-                <div className="absolute top-4 left-4 bg-black/50 rounded-lg px-3 py-1 text-sm">
+                <div className="absolute top-4 left-4 z-30 bg-black/50 rounded-lg px-3 py-1 text-sm">
                   {peerName} · {formatDuration(callDuration)}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setIsVideoExpanded(expanded => !expanded)}
+                  title={
+                    isVideoExpanded
+                      ? "Exit full screen call view"
+                      : "Expand video call view"
+                  }
+                  aria-label={
+                    isVideoExpanded
+                      ? "Exit full screen call view"
+                      : "Expand video call view"
+                  }
+                  className="absolute top-3 right-3 z-30 flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white transition-colors hover:bg-black/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                >
+                  {isVideoExpanded ? (
+                    <Minimize2 className="h-5 w-5" />
+                  ) : (
+                    <Maximize2 className="h-5 w-5" />
+                  )}
+                </button>
               </div>
             ) : (
               /* Voice call */
@@ -685,9 +848,17 @@ export default function CallModal({
                   </AvatarFallback>
                 </Avatar>
                 <p className="text-2xl font-bold">{peerName}</p>
-                <p className="text-green-400 font-mono">{formatDuration(callDuration)}</p>
+                <p className="text-green-400 font-mono">
+                  {formatDuration(callDuration)}
+                </p>
                 {/* Remote sound is handled by the dedicated audio element above. */}
-                <video ref={localVideoRef} autoPlay playsInline muted className="hidden" />
+                <video
+                  ref={localVideoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="hidden"
+                />
               </div>
             )}
 
@@ -698,10 +869,16 @@ export default function CallModal({
                 title={micOn ? "Mute" : "Unmute"}
                 className={cn(
                   "w-12 h-12 rounded-full flex items-center justify-center transition-colors",
-                  micOn ? "bg-gray-600 hover:bg-gray-500" : "bg-red-600 hover:bg-red-700"
+                  micOn
+                    ? "bg-gray-600 hover:bg-gray-500"
+                    : "bg-red-600 hover:bg-red-700"
                 )}
               >
-                {micOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
+                {micOn ? (
+                  <Mic className="w-5 h-5" />
+                ) : (
+                  <MicOff className="w-5 h-5" />
+                )}
               </button>
 
               {isVideo && (
@@ -710,23 +887,37 @@ export default function CallModal({
                   title={camOn ? "Turn off camera" : "Turn on camera"}
                   className={cn(
                     "w-12 h-12 rounded-full flex items-center justify-center transition-colors",
-                    camOn ? "bg-gray-600 hover:bg-gray-500" : "bg-red-600 hover:bg-red-700"
+                    camOn
+                      ? "bg-gray-600 hover:bg-gray-500"
+                      : "bg-red-600 hover:bg-red-700"
                   )}
                 >
-                  {camOn ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
+                  {camOn ? (
+                    <Video className="w-5 h-5" />
+                  ) : (
+                    <VideoOff className="w-5 h-5" />
+                  )}
                 </button>
               )}
 
               {isVideo && (
                 <button
                   onClick={toggleScreenShare}
-                  title={isScreenSharing ? "Stop sharing screen" : "Share screen"}
+                  title={
+                    isScreenSharing ? "Stop sharing screen" : "Share screen"
+                  }
                   className={cn(
                     "w-12 h-12 rounded-full flex items-center justify-center transition-colors",
-                    isScreenSharing ? "bg-blue-600 hover:bg-blue-700" : "bg-gray-600 hover:bg-gray-500"
+                    isScreenSharing
+                      ? "bg-blue-600 hover:bg-blue-700"
+                      : "bg-gray-600 hover:bg-gray-500"
                   )}
                 >
-                  {isScreenSharing ? <ScreenShareOff className="w-5 h-5" /> : <ScreenShare className="w-5 h-5" />}
+                  {isScreenSharing ? (
+                    <ScreenShareOff className="w-5 h-5" />
+                  ) : (
+                    <ScreenShare className="w-5 h-5" />
+                  )}
                 </button>
               )}
 
