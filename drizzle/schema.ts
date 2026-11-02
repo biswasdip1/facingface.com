@@ -1181,3 +1181,16 @@ export const profileViews = pgTable("profile_views", {
 
 export type ProfileView = typeof profileViews.$inferSelect;
 export type InsertProfileView = typeof profileViews.$inferInsert;
+
+// Optional promotional member cards. No sensitive identity data is stored here.
+export const digitalMemberCards = pgTable("digital_member_cards", {
+  userId: integer("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  memberNumber: varchar("memberNumber", { length: 19 }).notNull().unique(),
+  shareToken: varchar("shareToken", { length: 48 }).notNull().unique(),
+  enabled: boolean("enabled").default(false).notNull(),
+  showName: boolean("showName").default(true).notNull(),
+  showPhoto: boolean("showPhoto").default(false).notNull(),
+  appearance: varchar("appearance", { length: 10 }).default("classic").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});

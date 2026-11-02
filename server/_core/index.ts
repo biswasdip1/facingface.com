@@ -76,6 +76,13 @@ async function startServer() {
   await runAllSeeds();
   const app = express();
   const server = createServer(app);
+  // Shared cards are opt-in link pages, not a searchable member directory.
+  app.use("/member", (_req, res, next) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    next();
+  });
   // Stripe webhook MUST be before express.json() to receive raw body for signature verification
   registerStripeWebhook(app);
   // Configure body parser with larger size limit for file uploads

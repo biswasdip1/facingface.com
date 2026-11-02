@@ -59,6 +59,8 @@ import Reels, { ReelShareCard } from "./pages/Reels";
 import CallModal from "./components/CallModal";
 import WebsiteNoticePopup from "./components/WebsiteNoticePopup";
 import FloatingChatManager from "./components/FloatingChatManager";
+import MemberCard from "./pages/MemberCard";
+import SharedMemberCard from "./pages/SharedMemberCard";
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading } = useAuth();
@@ -283,6 +285,7 @@ function AppLayout() {
         <Switch>
           <Route path="/" component={Feed} />
           <Route path="/profile/:id?" component={Profile} />
+          <Route path="/member-card" component={MemberCard} />
           <Route path="/notifications" component={Notifications} />
           <Route path="/friends" component={Friends} />
           <Route path="/messages" component={Messages} />
@@ -332,6 +335,7 @@ function Router() {
   const path = window.location.pathname;
   const host = window.location.hostname.toLowerCase();
   const isMessengerHost = host === "chat.facingface.com" || (host.startsWith("chat.") && !host.includes("localhost"));
+  if (path.startsWith("/member/")) return <Switch><Route path="/member/:linkId" component={SharedMemberCard} /><Route component={NotFound} /></Switch>;
   if (path === "/forgot-password") return <ForgotPassword />;
   if (path === "/reset-password") return <ResetPassword />;
   if (path === "/verify-email") return <VerifyEmail />;

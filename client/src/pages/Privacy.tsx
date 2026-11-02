@@ -39,6 +39,8 @@ export default function PrivacyPage() {
         <p>
           We do not sell your personal data. We may share information with trusted third-party service providers (such as Stripe for payments and cloud infrastructure providers) solely to operate our platform. We may also disclose information when required by law.
         </p>
+        <h3 className="mt-4 mb-2 font-bold">Optional Digital Member Cards</h3>
+        <p>You may choose to create a promotional FacingFace member card. Public sharing is off by default, and the profile photo is not included initially. If you enable sharing, anyone with the card link or QR can see the selected display name, optional photo, random member number and card design. Your card does not include your email, phone, birthday, address, posts or messages, and does not verify real-world identity. You can disable sharing or replace the link in My Member Card. This stops access through the old link, but images and screenshots already downloaded by you or others cannot be recalled. Viewing a full profile or sending a friend request continues to require sign-in.</p>
       </section>
 
       <section>

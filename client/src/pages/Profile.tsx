@@ -863,6 +863,7 @@ export default function Profile() {
                     </button>
                   </div>
                 ) : (
+                  <div className="flex flex-wrap gap-2">
                   <button
                     onClick={startEditing}
                     className="its-btn border border-foreground text-foreground px-4 py-2 text-xs font-bold tracking-widest uppercase hover:bg-foreground hover:text-background transition-colors flex items-center gap-1"
@@ -870,6 +871,8 @@ export default function Profile() {
                     <Edit2 size={12} />
                     Edit Profile
                   </button>
+                  <button type="button" onClick={() => navigate("/member-card")} className="its-btn border border-border text-foreground px-4 py-2 text-xs font-bold tracking-wide hover:bg-secondary transition-colors flex items-center gap-1.5"><Share2 size={13} />My Member Card</button>
+                  </div>
                 )
               ) : (
                 <>

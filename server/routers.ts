@@ -6,6 +6,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { broadcastRouter } from "./_core/broadcastRouter";
 import { stopAllStreamsRouter } from "./_core/stopAllStreamsRouter";
+import { memberCardsRouter } from "./memberCardsRouter";
 import { enhancedSubscriptionRouter } from "./_core/subscriptionRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { sdk } from "./_core/sdk";
@@ -4853,6 +4854,7 @@ const eventsRouter = router({
 });
 
 export const appRouter = router({
+  memberCards: memberCardsRouter,
   system: systemRouter,
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
@@ -5421,6 +5423,5 @@ export const appRouter = router({
   events: eventsRouter,
 });
 export type AppRouter = typeof appRouter;
-
 
 

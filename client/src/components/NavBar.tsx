@@ -363,6 +363,8 @@ export default function NavBar() {
         </a>
       )}
 
+      {user && <a href="/member-card" className="flex items-center gap-3 px-4 py-2.5 text-xs font-semibold no-underline transition-colors border-b hover:bg-muted" style={{ color: "var(--its-text-primary)", borderColor: "var(--its-border)" }} onClick={() => setDropdownOpen(false)}><BookImage size={14} style={{ color: "var(--its-text-muted)" }} />My Member Card<span className="ml-auto text-[10px] font-normal" style={{ color: "var(--its-text-muted)" }}>Optional</span></a>}
+
       {/* Nav links — Home top-level, sub-items collapse/expand on tap */}
       <div className="border-b" style={{ borderColor: "var(--its-border)" }}>
         {/* Home — toggle button */}
