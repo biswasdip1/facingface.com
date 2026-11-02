@@ -332,7 +332,9 @@ function AppLayout() {
 
 function Router() {
   // These pages must be accessible without a session
-  const path = window.location.pathname;
+  // Subscribe here as well as inside each Switch: leaving a public card must
+  // select the normal app layout, not stay in the card-only fallback route.
+  const [path] = useLocation();
   const host = window.location.hostname.toLowerCase();
   const isMessengerHost = host === "chat.facingface.com" || (host.startsWith("chat.") && !host.includes("localhost"));
   if (path.startsWith("/member/")) return <Switch><Route path="/member/:linkId" component={SharedMemberCard} /><Route component={NotFound} /></Switch>;
