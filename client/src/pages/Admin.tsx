@@ -13,6 +13,7 @@ import {
 import { BroadcastComposer, BroadcastsList } from "@/components/BroadcastUI";
 import { WebsiteNoticeContent, type WebsiteNoticeData } from "@/components/WebsiteNoticePopup";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 
 type Tab =
@@ -923,38 +924,72 @@ function UsersTab({
                   )}
                 </td>
                 <td className="py-3 px-3">
-                  <div className="flex items-center gap-2">
-                    {isSuspended(u) ? (
-                      <button onClick={() => unsuspendMutation.mutate({ userId: u.id })}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs" style={{ backgroundColor: "#d1fae5", color: "#065f46" }}>
-                        <UserCheck size={13} /> Unsuspend
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label={`Actions for ${u.name ?? "user"} (#${u.id})`}
+                        disabled={suspendMutation.isPending || unsuspendMutation.isPending || setRoleMutation.isPending || deleteAccountMutation.isPending}
+                        className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border px-3 py-1.5 text-xs font-medium shadow-sm transition-colors hover:bg-[var(--its-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
+                        style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)", color: "var(--its-text-primary)" }}
+                      >
+                        Actions <ChevronDown size={13} aria-hidden="true" />
                       </button>
-                    ) : (
-                      <button onClick={() => { setSuspendUserId(u.id); setSuspendDays(7); setSuspendReason(""); }}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs" style={{ backgroundColor: "#fee2e2", color: "#991b1b" }}>
-                        <Ban size={13} /> Suspend
-                      </button>
-                    )}
-                    {isSuperAdmin && u.role !== "admin" && u.role !== "super_admin" ? (
-                      <button onClick={() => { if (confirm(`Promote ${u.name} to admin?`)) setRoleMutation.mutate({ userId: u.id, role: "admin" }); }}
-                        className="px-2.5 py-1.5 rounded text-xs" style={{ backgroundColor: "#dbeafe", color: "#1e40af" }}>
-                        Make Admin
-                      </button>
-                    ) : isSuperAdmin && u.role === "admin" ? (
-                      <button onClick={() => { if (confirm(`Demote ${u.name} to user?`)) setRoleMutation.mutate({ userId: u.id, role: "user" }); }}
-                        className="px-2.5 py-1.5 rounded text-xs" style={{ backgroundColor: "var(--its-border)", color: "var(--its-text-muted)" }}>
-                        Demote
-                      </button>
-                    ) : null}
-                    {isSuperAdmin && u.role !== "super_admin" && (
-                      <button onClick={() => { setDeleteUserId(u.id); setDeleteConfirmName(""); }}
-                        className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold"
-                        style={{ backgroundColor: "#dc2626", color: "#ffffff" }}
-                        title="Permanently delete this member account">
-                        <Trash2 size={13} /> Delete
-                      </button>
-                    )}
-                  </div>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align="end"
+                      sideOffset={6}
+                      className="z-[70] w-52 rounded-lg p-1.5 shadow-lg"
+                      style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)", color: "var(--its-text-primary)" }}
+                    >
+                      <DropdownMenuLabel className="truncate px-3 py-2 text-xs" style={{ color: "var(--its-text-muted)" }}>
+                        {u.name ?? `User #${u.id}`}
+                      </DropdownMenuLabel>
+                      <DropdownMenuSeparator style={{ backgroundColor: "var(--its-border)" }} />
+                      {isSuspended(u) ? (
+                        <DropdownMenuItem
+                          onSelect={() => unsuspendMutation.mutate({ userId: u.id })}
+                          className="rounded-md px-3 py-2 text-xs focus:bg-[var(--its-surface-hover)] focus:text-[var(--its-text-primary)]"
+                        >
+                          <UserCheck size={15} /> Unsuspend
+                        </DropdownMenuItem>
+                      ) : (
+                        <DropdownMenuItem
+                          onSelect={() => { setSuspendUserId(u.id); setSuspendDays(7); setSuspendReason(""); }}
+                          className="rounded-md px-3 py-2 text-xs focus:bg-[var(--its-surface-hover)] focus:text-[var(--its-text-primary)]"
+                        >
+                          <Ban size={15} /> Suspend
+                        </DropdownMenuItem>
+                      )}
+                      {isSuperAdmin && u.role !== "admin" && u.role !== "super_admin" ? (
+                        <DropdownMenuItem
+                          onSelect={() => { if (confirm(`Promote ${u.name} to admin?`)) setRoleMutation.mutate({ userId: u.id, role: "admin" }); }}
+                          className="rounded-md px-3 py-2 text-xs focus:bg-[var(--its-surface-hover)] focus:text-[var(--its-text-primary)]"
+                        >
+                          <Shield size={15} /> Make Admin
+                        </DropdownMenuItem>
+                      ) : isSuperAdmin && u.role === "admin" ? (
+                        <DropdownMenuItem
+                          onSelect={() => { if (confirm(`Demote ${u.name} to user?`)) setRoleMutation.mutate({ userId: u.id, role: "user" }); }}
+                          className="rounded-md px-3 py-2 text-xs focus:bg-[var(--its-surface-hover)] focus:text-[var(--its-text-primary)]"
+                        >
+                          <UserCheck size={15} /> Demote
+                        </DropdownMenuItem>
+                      ) : null}
+                      {isSuperAdmin && u.role !== "super_admin" && (
+                        <>
+                          <DropdownMenuSeparator style={{ backgroundColor: "var(--its-border)" }} />
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onSelect={() => { setDeleteUserId(u.id); setDeleteConfirmName(""); }}
+                            className="rounded-md px-3 py-2 text-xs font-semibold"
+                          >
+                            <Trash2 size={15} /> Delete
+                          </DropdownMenuItem>
+                        </>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </td>
               </tr>
             ))}
