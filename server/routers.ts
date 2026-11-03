@@ -2,6 +2,8 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME, ONE_YEAR_MS, POST_WORD_LIMIT } from "@shared/const";
 import { POST_FEELING_VALUES } from "@shared/postSocialMetadata";
+import { LIVE_STREAM_DURATION_MS, liveStreamDeadline } from "@shared/liveStream";
+import { registerLiveStreamDeadline, endLiveStreamSession } from "./liveStream";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { broadcastRouter } from "./_core/broadcastRouter";
@@ -1874,13 +1876,18 @@ const liveRouter = router({
         throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Today's limit has been reached, upload again after 24 hrs., due to space control we do have limit system for while." });
       }
       const streamId = await createLiveStream(ctx.user.id, input.title);
-      return { streamId };
+      const stream = await getLiveStream(streamId);
+      if (stream) registerLiveStreamDeadline(stream);
+      return { streamId, durationMs: LIVE_STREAM_DURATION_MS, expiresAt: stream ? liveStreamDeadline(stream.startedAt) : Date.now() + LIVE_STREAM_DURATION_MS };
     }),
 
   end: protectedProcedure
     .input(z.object({ streamId: z.number().int() }))
     .mutation(async ({ ctx, input }) => {
-      await endLiveStream(input.streamId, ctx.user.id);
+      const stream = await getLiveStream(input.streamId);
+      if (!stream) throw new TRPCError({ code: "NOT_FOUND", message: "Live stream not found." });
+      if (stream.hostId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "Only the host can end this live stream." });
+      await endLiveStreamSession(input.streamId, ctx.user.id);
       return { success: true };
     }),
 
@@ -1890,13 +1897,16 @@ const liveRouter = router({
       const stream = await getLiveStream(input.streamId);
       if (!stream) return null;
       const host = await getUserById(stream.hostId);
-      return { ...stream, host };
+      return { ...stream, expiresAt: liveStreamDeadline(stream.startedAt), host: host ? { id: host.id, name: host.name, avatar: host.avatar, isVerified: host.isVerified } : null };
     }),
 
   listActive: publicProcedure.query(async () => {
     const streams = await getActiveLiveStreams();
     const withHosts = await Promise.all(
-      streams.map(async (s) => ({ ...s, host: await getUserById(s.hostId) }))
+      streams.map(async (s) => {
+        const host = await getUserById(s.hostId);
+        return { ...s, expiresAt: liveStreamDeadline(s.startedAt), host: host ? { id: host.id, name: host.name, avatar: host.avatar, isVerified: host.isVerified } : null };
+      })
     );
     return withHosts;
   }),

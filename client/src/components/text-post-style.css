@@ -197,6 +197,17 @@
     padding-right: 14px;
   }
 }
+/* An attachment needs a caption, not a second large visual canvas. */
+.ff-composer-editor.ff-media-caption {
+  min-height: 92px;
+  padding: 12px 14px;
+}
+.ff-media-caption .ff-composer-textarea {
+  min-height: 64px;
+  max-height: 240px;
+  font-size: clamp(1rem, 1.7vw, 1.125rem);
+  line-height: 1.5;
+}
 @media (prefers-reduced-motion: reduce) {
   .ff-colour-swatch {
     transition: none;

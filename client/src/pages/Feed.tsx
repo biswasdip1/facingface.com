@@ -206,9 +206,8 @@ export default function Feed() {
     { refetchOnWindowFocus: false, enabled: feedMode === "latest" }
   );
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: liveStreams, refetch: refetchLive } = (trpc as any).live.listActive.useQuery(undefined, {
-    refetchInterval: 15000,
+  const { data: liveStreams, refetch: refetchLive } = trpc.live.listActive.useQuery(undefined, {
+    refetchInterval: 5000,
   });
 
   const { data: inlineReelsData } = trpc.reels.feed.useQuery(
@@ -324,7 +323,7 @@ export default function Feed() {
   const commentCounts = allCommentCounts;
   const resharedPosts: Record<number, any> = allResharedPosts;
   const resharedAuthors: Record<number, any> = allResharedAuthors;
-  const activeStreams: Array<{ id: number; title?: string; viewerCount: number; host?: { name?: string } }> = liveStreams ?? [];
+  const activeStreams = liveStreams ?? [];
   const inlineReels: InlineReel[] = (inlineReelsData?.reels ?? []) as InlineReel[];
 
   // Two years in ms — posts older than this with media will be flagged for deletion
@@ -472,8 +471,8 @@ export default function Feed() {
 
 
 
-        {/* Active live streams - DISABLED */}
-        {false && activeStreams.length > 0 && (
+        {/* Public active live streams — ordinary feed ordering is unchanged. */}
+        {activeStreams.length > 0 && (
           <div className="mb-6">
             <div className="flex items-center gap-2 mb-3">
               <Radio size={14} className="text-[var(--its-red)] animate-pulse" />
@@ -485,7 +484,7 @@ export default function Feed() {
               <div className="border border-[var(--its-red)]">
                 <LiveViewer
                   streamId={watchingStreamId}
-                  hostName={activeStreams.find((s) => s.id === watchingStreamId)?.host?.name}
+                  hostName={activeStreams.find((s) => s.id === watchingStreamId)?.host?.name ?? undefined}
                   onEnded={() => { setWatchingStreamId(null); refetchLive(); }}
                 />
                 <div className="p-3 flex items-center justify-between border-t border-border">
@@ -506,8 +505,8 @@ export default function Feed() {
                   <button
                     key={stream.id}
                     onClick={() => setWatchingStreamId(stream.id)}
-                    className="flex items-center justify-between border border-[var(--its-red)] p-3 hover:bg-red-50 transition-colors text-left w-full"
-                    style={{ borderRadius: 0 }}
+                    className="flex items-center justify-between border border-[var(--its-red)] p-3 hover:opacity-90 transition-colors text-left w-full"
+                    style={{ borderRadius: 10, background: "var(--its-surface)", color: "var(--its-text-primary)" }}
                   >
                     <div className="flex items-center gap-3">
                       <div className="w-2 h-2 bg-[var(--its-red)] animate-pulse" />

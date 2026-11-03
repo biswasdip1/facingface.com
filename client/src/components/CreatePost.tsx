@@ -216,8 +216,8 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
   const [liveStreamId, setLiveStreamId] = useState<number | null>(null);
   const [showLiveConfirm, setShowLiveConfirm] = useState(false);
   const [liveEventTopic, setLiveEventTopic] = useState("");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const createLiveMutation = (trpc as any).live.create.useMutation();
+  const liveStartingRef = useRef(false);
+  const createLiveMutation = trpc.live.create.useMutation();
   const [poll, setPoll] = useState<PollDraft>({ question: "", options: ["", ""] });
 
   // Daily quota
@@ -802,6 +802,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
 
   const hasBgColor = !!bgColor;
   const textPostSize = getTextPostSize(text);
+  const hasCaptionMedia = photoPreviews.length > 0 || !!videoFile;
 
   // Grow with typed/pasted text, but keep long drafts scrollable and publish
   // controls reachable. Observing width also handles phone rotation and wrapping.
@@ -811,7 +812,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
     if (!textarea) return;
     const resize = () => {
       textarea.style.height = "0px";
-      textarea.style.height = `${Math.min(textarea.scrollHeight, 480)}px`;
+      textarea.style.height = `${Math.min(textarea.scrollHeight, hasCaptionMedia ? 240 : 480)}px`;
     };
     resize();
     const parent = textarea.parentElement;
@@ -825,7 +826,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
     if (parent) observer?.observe(parent);
     window.addEventListener("resize", resize);
     return () => { observer?.disconnect(); window.removeEventListener("resize", resize); };
-  }, [text, bgColor, modalOpen, showPoll]);
+  }, [text, bgColor, modalOpen, showPoll, hasCaptionMedia]);
 
   // Whether the current text came from a persisted draft (i.e. it was there before the user typed anything new)
   const [hasSavedDraft, setHasSavedDraft] = useState(() => {
@@ -855,20 +856,30 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
   // Quick-action chips for the collapsed card
   // Handle Live button click — show confirmation dialog
   const handleLiveClick = () => {
+    if (liveStartingRef.current || liveStreamId) return;
+    if (quota && quota.live <= 0) {
+      toast.error(`Daily live stream limit reached. ${formatResetTime(quota.resetAt?.live)}`);
+      return;
+    }
     setLiveEventTopic("");
     setShowLiveConfirm(true);
   };
 
   // Handle confirming live stream
   const handleConfirmLive = async () => {
+    if (liveStartingRef.current || liveStreamId) return;
+    liveStartingRef.current = true;
     setShowLiveConfirm(false);
     try {
       const { streamId } = await createLiveMutation.mutateAsync({ title: liveEventTopic.trim() || undefined });
+      setModalOpen(false);
       setLiveStreamId(streamId);
       setLiveEventTopic("");
       refetchQuota();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to start live stream");
+    } finally {
+      liveStartingRef.current = false;
     }
   };
 
@@ -1002,27 +1013,13 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
           {/* Modal body */}
           <div className="ff-composer-body px-5 py-4">
 
-      {/* Live Broadcast View */}
-      {liveStreamId && (
-        <div className="mb-4">
-          <LiveBroadcast
-            streamId={liveStreamId}
-            hostId={user!.id}
-            onEnded={() => {
-              setLiveStreamId(null);
-              onSuccess?.();
-            }}
-          />
-          <p className="text-xs text-muted-foreground mt-2 uppercase tracking-widest">You are live — stream ends automatically after 3 minutes.</p>
-        </div>
-      )}
-
       {/* Text area — hidden when poll mode is active */}
       <div className={`relative mb-4${showPoll ? " hidden" : ""}`}>
         <div
-          className={`ff-composer-editor${hasBgColor ? " ff-colour-stage" : ""}`}
+          className={`ff-composer-editor${hasBgColor ? " ff-colour-stage" : ""}${hasCaptionMedia ? " ff-media-caption" : ""}`}
           data-text-size={textPostSize}
           data-colour-canvas={hasBgColor ? "true" : "false"}
+          data-media-caption={hasCaptionMedia ? "true" : "false"}
           style={{
             background: hasBgColor ? getTextPostBackground(bgColor) : undefined,
           }}
@@ -1031,7 +1028,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
             ref={textareaRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder={showPoll ? "Add a caption for your poll (optional)…" : "What's on your mind?"}
+            placeholder={hasCaptionMedia ? "Say something about your photo or video…" : showPoll ? "Add a caption for your poll (optional)…" : "What's on your mind?"}
             aria-label="Post text"
             rows={1}
             className={`ff-composer-textarea${hasBgColor ? " ff-text-content" : ""}`}
@@ -1585,25 +1582,17 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
             );
           })()}
 
-          {/* Live - DISABLED */}
-          {false && (() => {
+          {/* Live uses the same confirmation and separate camera panel as Home. */}
+          {(() => {
             const remaining = quota?.live ?? 3;
             const exhausted = remaining <= 0;
-            const disabled = hasMedia || showPoll || !!liveStreamId || exhausted;
+            const disabled = hasMedia || showPoll || !!liveStreamId || exhausted || createLiveMutation.isPending;
             return (
               <button
                 type="button"
                 disabled={disabled}
                 title={exhausted ? `Daily live stream limit reached. ${formatResetTime(quota?.resetAt?.live)}` : `${remaining} live stream(s) remaining today`}
-                onClick={async () => {
-                  try {
-                    const { streamId } = await createLiveMutation.mutateAsync({ title: text.trim() || undefined });
-                    setLiveStreamId(streamId);
-                    refetchQuota();
-                  } catch (e: unknown) {
-                    toast.error(e instanceof Error ? e.message : "Failed to start live stream");
-                  }
-                }}
+                onClick={handleLiveClick}
                 className={`flex items-center gap-1 text-xs font-bold tracking-widest uppercase transition-colors px-2.5 py-2 border ${
                   liveStreamId
                     ? "border-[var(--its-red)] bg-[var(--its-red)] text-white"
@@ -1840,6 +1829,17 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
         </DialogContent>
       </Dialog>
 
+      {/* Always mounted from the confirmed session, even when the composer was closed. */}
+      <Dialog open={liveStreamId !== null} onOpenChange={(open) => {
+        if (!open) { setLiveStreamId(null); onSuccess?.(); }
+      }}>
+        <DialogContent className="w-[calc(100%-24px)] sm:max-w-[720px] p-5" style={{ background: "var(--its-surface)", color: "var(--its-text-primary)" }} onInteractOutside={(event) => event.preventDefault()}>
+          <DialogTitle className="flex items-center gap-2"><Radio size={19} className="text-[var(--its-red)]" />Your live stream</DialogTitle>
+          <p className="text-sm" style={{ color: "var(--its-text-secondary)" }}>Maximum 5 minutes. A 30-second warning appears before automatic ending. Closing this panel stops your camera and stream.</p>
+          {liveStreamId !== null && user && <LiveBroadcast streamId={liveStreamId} hostId={user.id} onEnded={() => { setLiveStreamId(null); onSuccess?.(); }} />}
+        </DialogContent>
+      </Dialog>
+
       {/* Live Stream Confirmation Dialog */}
       <AlertDialog open={showLiveConfirm} onOpenChange={setShowLiveConfirm}>
         <AlertDialogContent>
@@ -1849,7 +1849,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
               Go Live?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              You are about to start a live stream. It will be visible to all your followers.
+              Start a public live stream visible in Live Now. Camera and microphone permission is required. Each broadcast lasts up to 5 minutes, then ends automatically.
             </AlertDialogDescription>
           </AlertDialogHeader>
           
@@ -1875,6 +1875,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleConfirmLive}
+              disabled={createLiveMutation.isPending || liveStreamId !== null}
               className="bg-red-500 hover:bg-red-600 text-white"
             >
               <Radio size={16} className="mr-2" />

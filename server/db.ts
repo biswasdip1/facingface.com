@@ -1,4 +1,5 @@
 import { orgPagePosts, OrgPagePost, InsertOrgPagePost, commentReactions } from "./../drizzle/schema";
+import { LIVE_STREAM_DURATION_MS, liveStreamDeadline } from "../shared/liveStream";
 import { countEffectiveReactions, mergePostReactors, type DurablePostReactor } from "./reactionConsistency";
 import { extractYouTubeVideoId, getYouTubeThumbnailUrl, isYouTubeUrl } from "./linkPreview";
 import { filterPeopleYouMayKnowCandidates } from "./peopleYouMayKnowAccess";
@@ -1542,7 +1543,7 @@ export async function getPollById(pollId: number): Promise<Poll | undefined> {
 export async function createLiveStream(hostId: number, title?: string): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(liveStreams).values({ hostId, title: title ?? null }).returning({ id: liveStreams.id });
+  const result = await db.insert(liveStreams).values({ hostId, title: title ?? null, startedAt: new Date() }).returning({ id: liveStreams.id });
   return result[0].id;
 }
 
@@ -1551,24 +1552,33 @@ export async function endLiveStream(streamId: number, hostId: number): Promise<v
   if (!db) throw new Error("Database not available");
   await db
     .update(liveStreams)
-    .set({ status: "ended", endedAt: new Date() })
-    .where(and(eq(liveStreams.id, streamId), eq(liveStreams.hostId, hostId)));
+    .set({ status: "ended", endedAt: new Date(), viewerCount: 0 })
+    .where(and(eq(liveStreams.id, streamId), eq(liveStreams.hostId, hostId), eq(liveStreams.status, "active")));
 }
 
 export async function getLiveStream(streamId: number): Promise<LiveStream | undefined> {
   const db = await getDb();
   if (!db) return undefined;
   const result = await db.select().from(liveStreams).where(eq(liveStreams.id, streamId)).limit(1);
-  return result[0];
+  const stream = result[0];
+  if (stream?.status === "active" && liveStreamDeadline(stream.startedAt) <= Date.now()) {
+    await endLiveStream(stream.id, stream.hostId);
+    return { ...stream, status: "ended", endedAt: new Date(), viewerCount: 0 };
+  }
+  return stream;
 }
 
 export async function getActiveLiveStreams(): Promise<LiveStream[]> {
   const db = await getDb();
   if (!db) return [];
+  // Clean stale rows left by a browser/server restart, without deleting history.
+  await db.update(liveStreams)
+    .set({ status: "ended", endedAt: new Date(), viewerCount: 0 })
+    .where(and(eq(liveStreams.status, "active"), lt(liveStreams.startedAt, new Date(Date.now() - LIVE_STREAM_DURATION_MS))));
   return db
     .select()
     .from(liveStreams)
-    .where(eq(liveStreams.status, "active"))
+    .where(and(eq(liveStreams.status, "active"), gt(liveStreams.startedAt, new Date(Date.now() - LIVE_STREAM_DURATION_MS))))
     .orderBy(desc(liveStreams.startedAt));
 }
 
