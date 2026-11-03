@@ -1,7 +1,7 @@
 import { orgPagePosts, OrgPagePost, InsertOrgPagePost, commentReactions } from "./../drizzle/schema";
 import { LIVE_STREAM_DURATION_MS, liveStreamDeadline } from "../shared/liveStream";
 import { TRPCError } from "@trpc/server";
-import { GROUP_CALL_MAX_PARTICIPANTS, GROUP_CALL_STALE_MS, GROUP_CALL_SIGNAL_TYPES, validGroupCallSignalPayload, type GroupCallSignalType } from "../shared/groupCall";
+import { GROUP_CALL_MAX_PARTICIPANTS, GROUP_CALL_STALE_MS, GROUP_CALL_WAITING_MS, GROUP_CALL_SIGNAL_TYPES, validGroupCallSignalPayload, type GroupCallSignalType } from "../shared/groupCall";
 import { countEffectiveReactions, mergePostReactors, type DurablePostReactor } from "./reactionConsistency";
 import { extractYouTubeVideoId, getYouTubeThumbnailUrl, isYouTubeUrl } from "./linkPreview";
 import { filterPeopleYouMayKnowCandidates } from "./peopleYouMayKnowAccess";
@@ -3095,7 +3095,7 @@ async function expireCallRoom(tx: CallRoomTransaction, room: CallRoom, now: Date
   if (retiredIds.length) await tx.update(callParticipants).set({ leftAt: now }).where(inArray(callParticipants.id, retiredIds));
   await clearCallSignalsForUsers(tx, room.id, Array.from(retiredUsers).filter(userId => !seen.has(userId)));
   if (room.status !== "ended" && active.length === 0
-    && (room.status === "active" || now.getTime() - room.startedAt.getTime() >= GROUP_CALL_STALE_MS)) {
+    && (room.status === "active" || now.getTime() - room.startedAt.getTime() >= GROUP_CALL_WAITING_MS)) {
     await tx.update(callRooms).set({ status: "ended", endedAt: now }).where(eq(callRooms.id, room.id));
     room.status = "ended";
     room.endedAt = now;

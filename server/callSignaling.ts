@@ -1,6 +1,7 @@
 import type { Server as SocketServer } from "socket.io";
 import { sendCallPushNotification } from "./webpush";
 import { sdk } from "./_core/sdk";
+import { GROUP_CALL_INVITATION_EVENT, type GroupCallInvitationPayload } from "../shared/callInvites";
 
 // A user can have the main website and a messaging page open at the same time.
 // Keep every authenticated connection rather than replacing one socket with another.
@@ -71,6 +72,17 @@ export function emitDirectMessageRefresh(participantIds: number[], conversationI
   if (!Number.isInteger(conversationId) || conversationId <= 0) return;
   const recipients = new Set(participantIds.filter((id) => Number.isInteger(id) && id > 0));
   for (const recipientId of recipients) emitToUser(recipientId, "dm:refresh", { conversationId });
+}
+
+/** Called only after authorized room creation and durable invitation messages. */
+export function emitGroupCallInvitation(recipientIds: number[], payload: GroupCallInvitationPayload) {
+  const recipients = Array.from(new Set(recipientIds.filter(id => Number.isInteger(id) && id > 0 && id !== payload.fromId)));
+  // Explicit projection prevents accidental disclosure if a caller passes extras.
+  const invitation: GroupCallInvitationPayload = {
+    roomId: payload.roomId, groupId: payload.groupId, fromId: payload.fromId,
+    fromName: payload.fromName, type: payload.type, expiresAt: payload.expiresAt,
+  };
+  for (const recipientId of recipients) emitToUser(recipientId, GROUP_CALL_INVITATION_EVENT, invitation);
 }
 
 /**

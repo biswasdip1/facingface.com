@@ -3,7 +3,7 @@ import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { eq } from "drizzle-orm";
 import { callParticipants, callRooms, callSignals, groupConversations, groupMembers, blocks } from "../drizzle/schema";
-import { GROUP_CALL_STALE_MS } from "../shared/groupCall";
+import { GROUP_CALL_STALE_MS, GROUP_CALL_WAITING_MS } from "../shared/groupCall";
 
 // Never use DATABASE_URL here: this suite opts into an isolated disposable database.
 // Each worker gets its own schema; no global migration or production DDL is run.
@@ -170,6 +170,8 @@ suite("durable group call helpers (real PostgreSQL row locks)", () => {
     const groupId = await newGroup();
     const oldId = await newRoom(groupId);
     await connection.update(callRooms).set({ startedAt: new Date(Date.now() - GROUP_CALL_STALE_MS - 1000) }).where(eq(callRooms.id, oldId));
+    expect((await helpers.getActiveCallRoomForGroup(groupId, 1))?.id).toBe(oldId);
+    await connection.update(callRooms).set({ startedAt: new Date(Date.now() - GROUP_CALL_WAITING_MS - 1000) }).where(eq(callRooms.id, oldId));
     expect(await helpers.getActiveCallRoomForGroup(groupId, 1)).toBeNull();
     expect((await helpers.getCallRoom(oldId, 1))?.status).toBe("ended");
     expect(await newRoom(groupId)).not.toBe(oldId);

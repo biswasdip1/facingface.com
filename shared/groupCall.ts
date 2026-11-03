@@ -4,6 +4,8 @@ import { z } from "zod";
 export const GROUP_CALL_MAX_PARTICIPANTS = 4;
 /** joinedAt is the existing durable last-heartbeat field; no migration needed. */
 export const GROUP_CALL_STALE_MS = 45_000;
+/** Invitation recipients need time to respond before the first person joins. */
+export const GROUP_CALL_WAITING_MS = 5 * 60_000;
 export const GROUP_CALL_SIGNAL_MAX_BYTES = 64 * 1024;
 export const GROUP_CALL_SIGNAL_TYPES = ["offer", "answer", "ice-candidate"] as const;
 export type GroupCallSignalType = (typeof GROUP_CALL_SIGNAL_TYPES)[number];

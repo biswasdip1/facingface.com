@@ -10,6 +10,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { broadcastRouter } from "./_core/broadcastRouter";
 import { stopAllStreamsRouter } from "./_core/stopAllStreamsRouter";
 import { memberCardsRouter } from "./memberCardsRouter";
+import { callInvitesRouter } from "./callInvitesRouter";
 import { recommendationsRouter } from "./recommendationsRouter";
 import { enhancedSubscriptionRouter } from "./_core/subscriptionRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -4913,6 +4914,7 @@ const eventsRouter = router({
 
 export const appRouter = router({
   memberCards: memberCardsRouter,
+  callInvites: callInvitesRouter,
   system: systemRouter,
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),

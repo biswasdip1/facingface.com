@@ -215,6 +215,12 @@ export default function Calls() {
     attachLocalMedia();
   }, [callState, attachRemoteMedia, attachLocalMedia]);
 
+  useEffect(() => {
+    const leaveForGroup = () => hangUp();
+    window.addEventListener("facingface:leave-direct-for-group", leaveForGroup);
+    return () => window.removeEventListener("facingface:leave-direct-for-group", leaveForGroup);
+  }, [callState]);
+
   const flushPendingIceCandidates = useCallback(
     async (pc: RTCPeerConnection) => {
       if (!pc.remoteDescription) return;

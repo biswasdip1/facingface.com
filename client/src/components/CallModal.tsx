@@ -30,10 +30,15 @@ import {
   ScreenShareOff,
   Maximize2,
   Minimize2,
+  UserPlus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc";
+import AddCallPeople from "@/components/AddCallPeople";
+import { useLocation } from "wouter";
+import { openInvitedCall } from "@/components/GroupCallInvitation";
+import { GROUP_CALL_WAITING_MS } from "@shared/groupCall";
 
 const ICE_SERVERS = [
   { urls: "stun:stun.l.google.com:19302" },
@@ -80,6 +85,23 @@ export default function CallModal({
   socketRef: externalSocketRef,
 }: CallModalProps) {
   const { user } = useAuth();
+  const [, navigate] = useLocation();
+  const utils = trpc.useUtils();
+  const [showAddPeople, setShowAddPeople] = useState(false);
+  const [preparedGroup, setPreparedGroup] = useState<{
+    roomId: number;
+    groupId: number;
+    expiresAt: number;
+  } | null>(null);
+  const [openingGroup, setOpeningGroup] = useState(false);
+  const preparedInvitationRef = useRef<{
+    roomId: number;
+    groupId: number;
+    fromId: number;
+    fromName: string;
+    type: "audio" | "video";
+    expiresAt: number;
+  } | null>(null);
   const { data: relayConfig, isLoading: relayConfigLoading } =
     trpc.calls.iceServers.useQuery(undefined, {
       staleTime: 45 * 60 * 1000,
@@ -234,6 +256,22 @@ export default function CallModal({
     return externalSocketRef?.current ?? internalSocketRef.current;
   }, [externalSocketRef]);
 
+  // A deliberate accepted invitation may come from the global prompt while a
+  // direct call is open on any page. Release old hardware before group media.
+  useEffect(() => {
+    const leaveForGroup = () => {
+      getSocket()?.emit("call:hangup", { to: peerId });
+      cleanup();
+      onClose();
+    };
+    window.addEventListener("facingface:leave-direct-for-group", leaveForGroup);
+    return () =>
+      window.removeEventListener(
+        "facingface:leave-direct-for-group",
+        leaveForGroup
+      );
+  }, [getSocket, peerId, onClose]);
+
   // Connect socket if we don't have an external one
   useEffect(() => {
     if (externalSocketRef?.current || !user) return;
@@ -296,6 +334,14 @@ export default function CallModal({
     const handleHangup = () => {
       if (!isMountedRef.current) return;
       toast.info(`${peerName} ended the call.`);
+      const invitation = preparedInvitationRef.current;
+      if (invitation && invitation.expiresAt > Date.now()) {
+        window.dispatchEvent(
+          new CustomEvent("facingface:group-call-invitation", {
+            detail: invitation,
+          })
+        );
+      }
       cleanup();
       onClose();
     };
@@ -650,6 +696,35 @@ export default function CallModal({
     return `${m}:${s}`;
   }
 
+  async function continueInGroup() {
+    if (!preparedGroup || openingGroup || !user) return;
+    setOpeningGroup(true);
+    try {
+      const data = await utils.calls.getRoom.fetch({
+        roomId: preparedGroup.roomId,
+      });
+      if (data.room.status === "ended")
+        throw new Error(
+          "This group call has expired. Please send a new invitation."
+        );
+      if (
+        data.participants.length >= 4 &&
+        !data.participants.some(p => p.userId === user.id)
+      )
+        throw new Error("This call is full.");
+      openInvitedCall(preparedGroup.roomId, navigate);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "The group call could not be opened. Your current call is still available."
+      );
+      if (preparedGroup.expiresAt <= Date.now()) setPreparedGroup(null);
+    } finally {
+      setOpeningGroup(false);
+    }
+  }
+
   // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
@@ -658,11 +733,13 @@ export default function CallModal({
       <div
         className={cn(
           "relative bg-gray-900 text-white rounded-2xl shadow-2xl overflow-hidden flex flex-col",
-          isVideo && phase === "connected" && isVideoExpanded
-            ? "w-full h-[100dvh] max-w-none rounded-none"
-            : isVideo && phase === "connected"
-              ? "w-full max-w-2xl"
-              : "w-full max-w-sm"
+          showAddPeople
+            ? "mx-3 w-full max-w-md h-[min(85dvh,680px)]"
+            : isVideo && phase === "connected" && isVideoExpanded
+              ? "w-full h-[100dvh] max-w-none rounded-none"
+              : isVideo && phase === "connected"
+                ? "w-full max-w-2xl"
+                : "w-full max-w-sm"
         )}
       >
         {/* ── Incoming call screen ── */}
@@ -863,7 +940,64 @@ export default function CallModal({
             )}
 
             {/* Controls */}
-            <div className="flex items-center justify-center gap-4 p-5 bg-gray-800">
+            {showAddPeople && (
+              <div className="absolute inset-0 z-40 flex flex-col overflow-y-auto bg-gray-900">
+                <AddCallPeople
+                  peerId={peerId}
+                  peerName={peerName}
+                  isVideo={isVideo}
+                  onClose={() => setShowAddPeople(false)}
+                  onCreated={result => {
+                    setShowAddPeople(false);
+                    const expiresAt =
+                      "expiresAt" in result &&
+                      typeof result.expiresAt === "number"
+                        ? result.expiresAt
+                        : Date.now() + GROUP_CALL_WAITING_MS;
+                    if (user)
+                      preparedInvitationRef.current = {
+                        roomId: result.roomId,
+                        groupId: result.groupId,
+                        fromId: user.id,
+                        fromName: user.name ?? "You",
+                        type: isVideo ? "video" : "audio",
+                        expiresAt,
+                      };
+                    setPreparedGroup({
+                      roomId: result.roomId,
+                      groupId: result.groupId,
+                      expiresAt,
+                    });
+                    toast.success(
+                      "Invitations sent. Choose Open group call to continue together."
+                    );
+                  }}
+                />
+              </div>
+            )}
+            {preparedGroup && (
+              <div
+                className="bg-gray-800 px-4 pt-3 text-center"
+                data-testid="direct-call-group-ready"
+              >
+                <p className="text-xs text-gray-300">
+                  Invitations sent. Moving to the group view reconnects your
+                  call with up to 4 people.
+                </p>
+                <button
+                  type="button"
+                  disabled={openingGroup}
+                  onClick={() => {
+                    void continueInGroup();
+                  }}
+                  data-testid="direct-call-open-group"
+                  className="mt-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold hover:bg-green-500 disabled:opacity-50"
+                >
+                  {openingGroup ? "Opening…" : "Open group call"}
+                </button>
+              </div>
+            )}
+            <div className="flex flex-wrap items-center justify-center gap-3 p-4 bg-gray-800">
               <button
                 onClick={toggleMic}
                 title={micOn ? "Mute" : "Unmute"}
@@ -920,6 +1054,19 @@ export default function CallModal({
                   )}
                 </button>
               )}
+
+              <button
+                type="button"
+                onClick={() => setShowAddPeople(value => !value)}
+                disabled={!!preparedGroup}
+                aria-label="Add people"
+                title="Add people"
+                data-testid="direct-call-add-people"
+                className="flex h-12 min-w-12 shrink-0 flex-col items-center justify-center rounded-full bg-gray-600 px-2 text-white transition-colors hover:bg-gray-500 disabled:opacity-50"
+              >
+                <UserPlus className="h-5 w-5" />
+                <span className="text-[10px]">Add</span>
+              </button>
 
               <button
                 onClick={hangUp}

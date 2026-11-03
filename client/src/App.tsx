@@ -61,6 +61,7 @@ import WebsiteNoticePopup from "./components/WebsiteNoticePopup";
 import FloatingChatManager from "./components/FloatingChatManager";
 import MemberCard from "./pages/MemberCard";
 import SharedMemberCard from "./pages/SharedMemberCard";
+import GroupCallInvitation, { isCallInvitation } from "./components/GroupCallInvitation";
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading } = useAuth();
@@ -180,6 +181,11 @@ function AppLayout() {
         });
         globalSocketRef.current = socket;
 
+        socket.on("call:group-invitation", (payload: unknown) => {
+          if (!isCallInvitation(payload)) return;
+          window.dispatchEvent(new CustomEvent("facingface:group-call-invitation", { detail: payload }));
+        });
+
         socket.on("post:friend-created", (payload: {
           postId?: number;
           authorId?: number;
@@ -276,6 +282,7 @@ function AppLayout() {
           onClose={() => setGlobalIncomingCall(null)}
         />
       )}
+      <GroupCallInvitation />
       <WebsiteNoticePopup scope="member" userId={user?.id} />
       <FloatingChatManager />
       <NetworkStatusBanner />
