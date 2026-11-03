@@ -1,1 +1,0 @@
-ALTER TABLE `users` ADD `coverCropY` int DEFAULT 50;
