@@ -17,14 +17,8 @@ import { useThemeMode } from "@/contexts/ThemeModeContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getPostFeeling } from "@shared/postSocialMetadata";
-
-function buildArtisticTextBackground(background: string): string {
-  return `radial-gradient(circle at 14% 20%, rgba(255,255,255,0.22) 0 13%, transparent 14%), radial-gradient(ellipse at 72% 48%, rgba(255,255,255,0.16) 0 30%, transparent 31%), radial-gradient(circle at 88% 82%, rgba(0,0,0,0.12) 0 20%, transparent 21%), ${background}`;
-}
-
-function getTextBackgroundTextColor(background: string): string {
-  return background.includes("#e5e7eb") || background.includes("#f8fafc") ? "#374151" : "#ffffff";
-}
+import { getTextPostBackground, getTextPostTextColor, getTextPostSize } from "@/lib/textPostStyle";
+import "./text-post-style.css";
 
 // ─── Word-diff utility ───────────────────────────────────────────────────────
 type DiffToken = { text: string; type: "equal" | "removed" | "added" };
@@ -1512,19 +1506,15 @@ export default function PostCard({ post, author, likeCount, commentCount = 0, is
             {post.bgColor ? (
               <>
                 <div
-                  className="relative mb-2 flex flex-col items-center justify-center overflow-hidden border border-border/60 px-8 py-12 sm:px-12"
+                  className="ff-colour-stage ff-published-colour-post"
+                  data-text-size={getTextPostSize(displayPostText)}
+                  data-published-colour-post={post.id}
                   style={{
-                    background: buildArtisticTextBackground(post.bgColor),
-                    minHeight: "170px",
-                    boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.12)",
+                    background: getTextPostBackground(post.bgColor),
                   }}
                 >
-                  <div
-                    className="pointer-events-none absolute inset-x-6 top-5 h-px opacity-50"
-                    style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.65), transparent)" }}
-                  />
-                  <p className="relative z-10 w-full text-center font-black leading-snug whitespace-pre-wrap break-words"
-                    style={{ color: getTextBackgroundTextColor(post.bgColor), fontSize: displayPostText.length <= 30 ? "2rem" : displayPostText.length <= 80 ? "1.35rem" : "1.05rem", lineHeight: displayPostText.length <= 30 ? "1.18" : "1.38", textShadow: getTextBackgroundTextColor(post.bgColor) === "#ffffff" ? "0 2px 8px rgba(0,0,0,0.45)" : "0 1px 2px rgba(255,255,255,0.55)" }}>
+                  <p className="ff-text-content"
+                    style={{ color: getTextPostTextColor(post.bgColor) }}>
                     <TextWithLinks text={isExpanded ? displayPostText : truncateText(displayPostText, BACKGROUND_VISIBLE_WORD_LIMIT).truncated} />
                   </p>
                 </div>

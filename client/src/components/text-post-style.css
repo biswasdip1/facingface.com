@@ -1,0 +1,204 @@
+/* Scoped to the composer and coloured wall posts; global themes stay unchanged. */
+.ff-post-composer[data-slot="dialog-content"] {
+  width: min(720px, calc(100vw - 24px));
+  max-width: 720px;
+  max-height: calc(100dvh - 24px);
+  display: block;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--its-surface, var(--background));
+  color: var(--its-text-primary, var(--foreground));
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.24);
+}
+.ff-composer-form {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 24px);
+  min-height: 0;
+}
+.ff-composer-header {
+  flex-shrink: 0;
+}
+.ff-composer-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.ff-composer-footer {
+  flex-shrink: 0;
+  border-top: 1px solid var(--its-border, var(--border));
+  background: var(--its-surface, var(--background));
+  padding-top: 14px;
+  padding-bottom: 14px;
+  gap: 12px;
+}
+.ff-composer-submit {
+  flex: 1;
+  min-height: 44px;
+  justify-content: center;
+  border-radius: 9px;
+}
+.ff-composer-editor {
+  display: flex;
+  align-items: flex-start;
+  min-height: 240px;
+  padding: 18px;
+  border: 1px solid var(--its-border, var(--border));
+  border-radius: 10px;
+  background: var(--its-surface-alt, var(--background));
+}
+.ff-composer-textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 200px;
+  max-height: 480px;
+  margin: 0;
+  padding: 0;
+  border: 0 !important;
+  outline: 0;
+  box-shadow: none !important;
+  resize: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: transparent !important;
+  color: var(--its-text-primary, var(--foreground));
+  font-size: clamp(1.125rem, 2vw, 1.375rem);
+  line-height: 1.55;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+.ff-composer-textarea::placeholder {
+  color: var(--its-text-muted, #64748b);
+  opacity: 0.85;
+}
+.ff-colour-stage {
+  --ff-post-font: clamp(1.75rem, 4vw, 2.5rem);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 340px;
+  padding: 32px 28px;
+  border: 0;
+  overflow: hidden;
+}
+.ff-colour-stage[data-text-size="medium"] {
+  --ff-post-font: clamp(1.5rem, 3.4vw, 2rem);
+}
+.ff-colour-stage[data-text-size="long"] {
+  --ff-post-font: clamp(1.125rem, 2.7vw, 1.375rem);
+}
+.ff-colour-stage .ff-text-content {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--ff-post-font);
+  line-height: 1.45;
+  font-weight: 700;
+  text-align: center;
+  white-space: pre-wrap;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+.ff-colour-stage .ff-composer-textarea {
+  min-height: 0;
+}
+.ff-colour-stage .ff-composer-textarea::placeholder {
+  color: inherit;
+  opacity: 0.78;
+}
+.ff-colour-stage a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.ff-colour-picker {
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid var(--its-border, var(--border));
+  border-radius: 10px;
+  background: var(--its-surface-alt, var(--background));
+}
+.ff-colour-picker-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+.ff-colour-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ff-colour-swatch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid var(--its-border, var(--border));
+  outline-offset: 3px;
+  cursor: pointer;
+  transition: transform 120ms ease-out;
+}
+.ff-colour-swatch:hover {
+  transform: translateY(-1px);
+}
+.ff-colour-swatch[aria-pressed="true"] {
+  outline: 2px solid var(--its-text-primary, var(--foreground));
+}
+.ff-colour-swatch:focus-visible {
+  outline: 3px solid #2563eb;
+}
+.ff-published-colour-post {
+  margin-bottom: 8px;
+  border-radius: 6px;
+}
+@media (min-width: 640px) {
+  .ff-colour-stage {
+    min-height: 360px;
+    padding: 38px 36px;
+  }
+}
+@media (max-width: 639px) {
+  .ff-composer-body {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  .ff-composer-header {
+    padding-left: 16px;
+  }
+  .ff-composer-editor {
+    min-height: 220px;
+    padding: 14px;
+  }
+  .ff-colour-stage {
+    min-height: 280px;
+    padding: 28px 20px;
+  }
+  .ff-colour-picker {
+    padding: 10px;
+  }
+  .ff-colour-swatches {
+    gap: 8px;
+  }
+  .ff-colour-swatch {
+    width: 32px;
+    height: 32px;
+  }
+  .ff-composer-footer {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ff-colour-swatch {
+    transition: none;
+  }
+}

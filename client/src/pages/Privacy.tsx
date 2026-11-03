@@ -32,6 +32,8 @@ export default function PrivacyPage() {
           <li>Detect and prevent fraud and abuse</li>
           <li>Comply with legal obligations</li>
         </ul>
+        <h3 className="mt-4 mb-2 font-bold">Optional For You Recommendations</h3>
+        <p>Home opens in Latest (newest first). If you choose For You, we use your private interest choices, followed accounts and topic labels from public Pages/Groups you follow to rank eligible recent wall posts. Learning from reactions and comments is off by default. If you explicitly enable it in Interests &amp; controls, your positive reactions and unflagged comments after enabling, within the last 30 days, may help identify related topics. We do not use messages, calls, search history, private-group membership or outside browsing for this feature, and do not infer sensitive personal traits. Not interested hides a post only from your For You selection. Reset recommendations clears chosen interests and hidden recommendations and turns activity learning off; it does not delete your posts, reactions, comments or follows. Previously recorded activity is not reused if you later enable learning again. Preferences and hidden-post choices are stored privately against your account and removed when the account is deleted.</p>
       </section>
 
       <section>

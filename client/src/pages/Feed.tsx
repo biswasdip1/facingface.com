@@ -7,6 +7,7 @@ import LiveViewer from "@/components/LiveViewer";
 import FeedAd from "@/components/FeedAd";
 import PeopleYouMayKnow from "@/components/PeopleYouMayKnow";
 import SuggestedPages from "@/components/SuggestedPages";
+import ForYouFeed from "@/components/ForYouFeed";
 
 import { AlertTriangle, Loader2, Radio, Users, RefreshCw, Mail, Play, Eye, MessageCircle, Newspaper, ExternalLink, BadgeCheck, ChevronDown, Gift, CalendarDays, Building2, UsersRound, Megaphone, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
@@ -158,6 +159,9 @@ function InlineVideoReel({ reels, slot }: { reels: InlineReel[]; slot: number })
 
 export default function Feed() {
   const { user } = useAuth();
+  const utils = trpc.useUtils();
+  // Always start Home in chronological Latest. For You is a deliberate choice.
+  const [feedMode, setFeedMode] = useState<"latest" | "forYou">("latest");
   const [emailBannerDismissed, setEmailBannerDismissed] = useState(
     () => sessionStorage.getItem("emailBannerDismissed") === "1"
   );
@@ -189,10 +193,17 @@ export default function Feed() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
+  const showLatest = () => {
+    setOffset(0);
+    setHasMore(true);
+    setIsLoadingMore(false);
+    setFeedMode("latest");
+    void utils.posts.feed.invalidate();
+  };
 
   const { data: feedData, isLoading: feedLoading, refetch } = trpc.posts.feed.useQuery(
     { limit, offset },
-    { refetchOnWindowFocus: false }
+    { refetchOnWindowFocus: false, enabled: feedMode === "latest" }
   );
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -218,7 +229,11 @@ export default function Feed() {
         setAllResharedAuthors((feedData as any)?.resharedAuthors ?? {});
       } else {
         // Subsequent loads - append new posts and merge data
-        setAllPosts((prev) => [...prev, ...feedData.posts]);
+        setAllPosts((prev) => {
+          const merged = new Map<number, any>(prev.map((post) => [post.id, post]));
+          for (const post of feedData.posts) merged.set(post.id, post);
+          return Array.from(merged.values());
+        });
         setAllAuthors((prev) => ({ ...prev, ...feedData.authors }));
         setAllLikeCounts((prev) => ({ ...prev, ...feedData.likeCounts }));
         setAllCommentCounts((prev) => ({ ...prev, ...(feedData as any)?.commentCounts }));
@@ -234,7 +249,7 @@ export default function Feed() {
   // Load more posts when user scrolls to bottom
   useEffect(() => {
     const handleScroll = () => {
-      if (isLoadingMore || !hasMore || feedLoading) return;
+      if (feedMode !== "latest" || isLoadingMore || !hasMore || feedLoading) return;
 
       const { scrollTop, scrollHeight, clientHeight } = document.documentElement;
       // Trigger load when user is 500px from bottom
@@ -246,7 +261,7 @@ export default function Feed() {
 
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
-  }, [isLoadingMore, hasMore, feedLoading, limit]);
+  }, [feedMode, isLoadingMore, hasMore, feedLoading, limit]);
 
   // Collect unique author IDs from the feed to check for active stories
   const feedAuthorIds = useMemo(
@@ -276,7 +291,8 @@ export default function Feed() {
     setAllPosts([]);
     setHasMore(true);
     await Promise.all([refetch(), refetchLive()]);
-  }, [refetch, refetchLive]);
+    if (feedMode === "forYou" && user) await utils.recommendations.feed.invalidate({ viewerId: user.id });
+  }, [refetch, refetchLive, feedMode, user?.id, utils]);
   const { pullDistance, isRefreshing } = usePullToRefresh({ onRefresh: handleRefresh });
 
   const postIds = useMemo(
@@ -294,7 +310,7 @@ export default function Feed() {
     [likedData]
   );
 
-  if (feedLoading && offset === 0) {
+  if (feedMode === "latest" && feedLoading && offset === 0) {
     return (
       <div className="container py-12 flex justify-center">
         <Loader2 className="animate-spin text-foreground" size={24} />
@@ -526,6 +542,12 @@ export default function Feed() {
           <StoryBar />
         </div>
 
+        <div role="tablist" aria-label="Home feed order" className="mb-4 flex items-center gap-1 rounded-xl border p-1" style={{ backgroundColor: "var(--its-surface)", borderColor: "var(--its-border)" }}>
+          <button type="button" role="tab" id="latest-feed-tab" aria-selected={feedMode === "latest"} aria-controls="home-feed-panel" onClick={showLatest} className="flex-1 rounded-lg px-4 py-2.5 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" style={{ backgroundColor: feedMode === "latest" ? "var(--its-surface-alt)" : "transparent", color: feedMode === "latest" ? "var(--its-text-primary)" : "var(--its-text-muted)" }}>Latest</button>
+          <button type="button" role="tab" id="for-you-feed-tab" aria-selected={feedMode === "forYou"} aria-controls="home-feed-panel" onClick={() => setFeedMode("forYou")} className="flex-1 rounded-lg px-4 py-2.5 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" style={{ backgroundColor: feedMode === "forYou" ? "var(--its-surface-alt)" : "transparent", color: feedMode === "forYou" ? "var(--its-text-primary)" : "var(--its-text-muted)" }}>For You</button>
+        </div>
+        <div id="home-feed-panel" role="tabpanel" aria-labelledby={feedMode === "latest" ? "latest-feed-tab" : "for-you-feed-tab"}>
+        {feedMode === "forYou" ? <ForYouFeed key={user?.id} onLatest={showLatest} /> : <>
         {/* Posts */}
         {posts.length === 0 && !isLoadingMore ? (
           <div className="border border-border p-12 text-center">
@@ -609,6 +631,8 @@ export default function Feed() {
             )}
           </div>
         ) : null}
+        </>}
+        </div>
         </main>
 
         <div className="hidden xl:block min-w-0">

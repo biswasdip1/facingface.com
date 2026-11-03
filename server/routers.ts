@@ -7,6 +7,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { broadcastRouter } from "./_core/broadcastRouter";
 import { stopAllStreamsRouter } from "./_core/stopAllStreamsRouter";
 import { memberCardsRouter } from "./memberCardsRouter";
+import { recommendationsRouter } from "./recommendationsRouter";
 import { enhancedSubscriptionRouter } from "./_core/subscriptionRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { sdk } from "./_core/sdk";
@@ -5420,8 +5421,7 @@ export const appRouter = router({
   broadcasts: broadcastRouter,
   stopStreams: stopAllStreamsRouter,
   inactiveReminders: inactiveRemindersRouter,
+  recommendations: recommendationsRouter,
   events: eventsRouter,
 });
 export type AppRouter = typeof appRouter;
-
-

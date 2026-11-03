@@ -9,6 +9,7 @@ import {
   timestamp,
   varchar,
   serial,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const call_history_status_enum = pgEnum("call_history_status_enum", ["missed", "answered", "declined"]);
@@ -1194,3 +1195,17 @@ export const digitalMemberCards = pgTable("digital_member_cards", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
+
+// Optional, owner-private For You settings. Existing wall/user tables are unchanged.
+export const feedRecommendationSettings = pgTable("feed_recommendation_settings", {
+  userId: integer("userId").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  interests: text("interests").default("[]").notNull(),
+  learnFromActivity: boolean("learnFromActivity").default(false).notNull(),
+  activitySince: timestamp("activitySince").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export const feedRecommendationHidden = pgTable("feed_recommendation_hidden", {
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  postId: integer("postId").notNull().references(() => posts.id, { onDelete: "cascade" }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, table => [uniqueIndex("feed_recommendation_hidden_user_post").on(table.userId, table.postId)]);

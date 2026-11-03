@@ -56,6 +56,8 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { POST_WORD_LIMIT } from "@shared/const";
 import { POST_FEELINGS, type PostFeelingValue } from "@shared/postSocialMetadata";
+import { TEXT_POST_BACKGROUNDS, getTextPostBackground, getTextPostTextColor, getTextPostSize } from "@/lib/textPostStyle";
+import "./text-post-style.css";
 
 
 const countWords = (value: string): number => {
@@ -95,44 +97,6 @@ interface PollDraft {
   expiresInHours?: number;
 }
 
-// Background color palette. Only short CSS color values are stored in posts.bgColor
-// because the API schema and PostgreSQL column limit this field to 30 characters.
-// The preview can still use gradients because it is never sent to the server.
-const BG_COLORS = [
-  { label: "White", value: "", preview: "#ffffff", text: "#000000" },
-  { label: "Red", value: "#E63329", preview: "#E63329", text: "#ffffff" },
-  { label: "Black", value: "#111111", preview: "#111111", text: "#ffffff" },
-  { label: "Blue", value: "#1a56db", preview: "#1a56db", text: "#ffffff" },
-  { label: "Green", value: "#057a55", preview: "#057a55", text: "#ffffff" },
-  { label: "Purple", value: "#7e3af2", preview: "#7e3af2", text: "#ffffff" },
-  { label: "Amber", value: "#d97706", preview: "#d97706", text: "#ffffff" },
-  { label: "Rose", value: "#e11d48", preview: "#e11d48", text: "#ffffff" },
-  { label: "Teal", value: "#0d9488", preview: "#0d9488", text: "#ffffff" },
-  {
-    label: "Artistic Red",
-    value: "#dc2626",
-    preview: "linear-gradient(135deg, #ff2f2f 0%, #e63329 52%, #7c2d12 100%)",
-    text: "#ffffff",
-  },
-  {
-    label: "Soft Grey",
-    value: "#e5e7eb",
-    preview: "linear-gradient(135deg, #e5e7eb 0%, #cbd5e1 48%, #f8fafc 100%)",
-    text: "#374151",
-  },
-  {
-    label: "Royal Blue",
-    value: "#1d4ed8",
-    preview: "linear-gradient(135deg, #0f172a 0%, #1d4ed8 48%, #7c3aed 100%)",
-    text: "#ffffff",
-  },
-];
-
-function buildArtisticTextBackground(background: string): string {
-  return `radial-gradient(circle at 14% 20%, rgba(255,255,255,0.22) 0 13%, transparent 14%), radial-gradient(ellipse at 72% 48%, rgba(255,255,255,0.16) 0 30%, transparent 31%), radial-gradient(circle at 88% 82%, rgba(0,0,0,0.12) 0 20%, transparent 21%), ${background}`;
-}
-
-
 // Compression options for photos
 const COMPRESSION_OPTIONS = {
   maxSizeMB: 1,           // Target ≤1MB per photo
@@ -150,30 +114,6 @@ const DEFAULT_AUDIO_MAX_MB = 5;
 const DEFAULT_AUDIO_MAX_SECS = 360;
 const DEFAULT_DOC_MAX_MB = 5;
 const DEFAULT_PHOTO_MAX_MB = 25;
-
-// Compute dynamic font size based on text length
-function getDynamicFontSize(text: string): string {
-  const len = text.length;
-  if (len === 0) return "0.875rem";
-  if (len <= 30) return "2rem";
-  if (len <= 80) return "1.25rem";
-  if (len <= 150) return "1rem";
-  return "0.875rem";
-}
-
-function getDynamicLineHeight(text: string): string {
-  const len = text.length;
-  if (len <= 30) return "1.2";
-  if (len <= 80) return "1.35";
-  return "1.5";
-}
-
-function getDynamicRows(text: string): number {
-  const len = text.length;
-  if (len <= 30) return 2;
-  if (len <= 80) return 3;
-  return 4;
-}
 
 export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName, groupHandle, groupName, groupCover }: CreatePostProps) {
   const { user } = useAuth();
@@ -857,16 +797,35 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
   const showPreviewCard = !previewDismissed && !showPoll && previewUrl && (previewLoading || preview);
   const isYouTubeShortPreview = isYouTubeShortUrl(previewUrl);
 
-  // Dynamic text styles
-  const fontSize = getDynamicFontSize(text);
-  const lineHeight = getDynamicLineHeight(text);
-  const rows = getDynamicRows(text);
   const wordCount = countWords(text);
   const isOverWordLimit = wordCount > POST_WORD_LIMIT;
 
-  // Selected bg color info
-  const selectedBg = BG_COLORS.find((c) => c.value === bgColor) ?? BG_COLORS[0];
   const hasBgColor = !!bgColor;
+  const textPostSize = getTextPostSize(text);
+
+  // Grow with typed/pasted text, but keep long drafts scrollable and publish
+  // controls reachable. Observing width also handles phone rotation and wrapping.
+  useEffect(() => {
+    if (!modalOpen || showPoll) return;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const resize = () => {
+      textarea.style.height = "0px";
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 480)}px`;
+    };
+    resize();
+    const parent = textarea.parentElement;
+    let previousWidth = parent?.clientWidth;
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => {
+      if (parent && parent.clientWidth !== previousWidth) {
+        previousWidth = parent.clientWidth;
+        resize();
+      }
+    }) : null;
+    if (parent) observer?.observe(parent);
+    window.addEventListener("resize", resize);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", resize); };
+  }, [text, bgColor, modalOpen, showPoll]);
 
   // Whether the current text came from a persisted draft (i.e. it was there before the user typed anything new)
   const [hasSavedDraft, setHasSavedDraft] = useState(() => {
@@ -990,12 +949,12 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
       </AlertDialog>
 
       <Dialog open={modalOpen} onOpenChange={handleModalOpenChange}>
-        <DialogContent className="max-w-2xl w-full p-0 gap-0 overflow-hidden max-h-[90vh] overflow-y-auto">
+        <DialogContent className="ff-post-composer p-0 gap-0">
           <DialogTitle className="sr-only">Create a post</DialogTitle>
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} className="ff-composer-form">
 
           {/* Modal header */}
-          <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-border">
+          <div className="ff-composer-header flex items-center justify-between gap-3 px-5 py-4 border-b border-border">
             <div className="flex min-w-0 items-center gap-3">
               <ComposerAvatar src={pageHandle ? pageAvatar : user?.avatar} name={pageHandle ? (pageName ?? pageHandle) : user?.name} />
               <div>
@@ -1041,7 +1000,7 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
           </div>
 
           {/* Modal body */}
-          <div className="px-5 py-4">
+          <div className="ff-composer-body px-5 py-4">
 
       {/* Live Broadcast View */}
       {liveStreamId && (
@@ -1061,13 +1020,11 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
       {/* Text area — hidden when poll mode is active */}
       <div className={`relative mb-4${showPoll ? " hidden" : ""}`}>
         <div
-          className="relative transition-all duration-200"
+          className={`ff-composer-editor${hasBgColor ? " ff-colour-stage" : ""}`}
+          data-text-size={textPostSize}
+          data-colour-canvas={hasBgColor ? "true" : "false"}
           style={{
-            background: hasBgColor ? buildArtisticTextBackground(bgColor) : "transparent",
-            padding: hasBgColor ? "2.75rem 2rem" : "0",
-            minHeight: hasBgColor ? "170px" : undefined,
-            display: hasBgColor ? "flex" : undefined,
-            alignItems: hasBgColor ? "center" : undefined,
+            background: hasBgColor ? getTextPostBackground(bgColor) : undefined,
           }}
         >
           <textarea
@@ -1075,14 +1032,11 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder={showPoll ? "Add a caption for your poll (optional)…" : "What's on your mind?"}
-            rows={rows}
-            className="w-full border-0 border-b px-0 py-2 focus:outline-none resize-none transition-all duration-200 bg-transparent"
+            aria-label="Post text"
+            rows={1}
+            className={`ff-composer-textarea${hasBgColor ? " ff-text-content" : ""}`}
             style={{
-              fontSize,
-              lineHeight,
-              fontWeight: text.length <= 80 ? "700" : "400",
-              color: hasBgColor ? selectedBg.text : "var(--foreground)",
-              borderBottomColor: hasBgColor ? `${selectedBg.text}44` : "var(--border)",
+              color: hasBgColor ? getTextPostTextColor(bgColor) : undefined,
             }}
             onKeyDown={(e) => { if (e.key === "Escape") setShowEmojiPicker(false); }}
           />
@@ -1141,25 +1095,26 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
       )}
 
       {/* Background color picker */}
-      {showColorPicker && (
-        <div className="mb-4 flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mr-1">Background:</span>
-          {BG_COLORS.map((color) => (
+      {showColorPicker && !hasMedia && !showPoll && !liveStreamId && (
+        <div className="ff-colour-picker" role="group" aria-label="Post background styles">
+          <div className="ff-colour-picker-label"><span className="font-semibold">Background</span><span className="text-muted-foreground">{TEXT_POST_BACKGROUNDS.find(color => color.value === bgColor)?.label ?? "Custom"}</span></div>
+          <div className="ff-colour-swatches">
+          {TEXT_POST_BACKGROUNDS.map((color) => (
             <button
               key={color.value}
               type="button"
               title={color.label}
+              aria-label={color.value ? `Background: ${color.label}` : "No background"}
+              aria-pressed={bgColor === color.value}
               onClick={() => setBgColor(color.value)}
-              className="w-6 h-6 flex-shrink-0 transition-transform hover:scale-110"
+              className="ff-colour-swatch"
               style={{
                 background: color.preview,
-                border: bgColor === color.value ? "2px solid var(--its-red)" : "2px solid var(--border)",
-                borderRadius: 0,
-                outline: bgColor === color.value ? "1px solid var(--its-red)" : "none",
-                outlineOffset: "1px",
+                color: getTextPostTextColor(color.value),
               }}
-            />
+            ><span aria-hidden="true" className="text-sm font-bold">{color.value ? bgColor === color.value ? "✓" : "" : "Aa"}</span></button>
           ))}
+          </div>
         </div>
       )}
 
@@ -1708,6 +1663,8 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
               type="button"
               onClick={() => setShowColorPicker((v) => !v)}
               title="Post background color"
+              aria-label="Post background color"
+              aria-expanded={showColorPicker}
               className={`flex items-center gap-1 text-xs font-bold tracking-widest uppercase transition-colors px-2.5 py-2 border ${
                 showColorPicker || hasBgColor
                   ? "border-[var(--its-red)] text-[var(--its-red)]"
@@ -1803,8 +1760,9 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
           </div>
         )}
 
+          </div>{/* end scrollable modal body */}
         {/* Publish button row */}
-        <div className="flex items-center justify-between px-5 pb-5 pt-2">
+        <div className="ff-composer-footer flex items-center justify-between px-5">
           {/* Schedule button */}
           <Popover open={schedulePopoverOpen} onOpenChange={setSchedulePopoverOpen}>
             <PopoverTrigger asChild>
@@ -1871,14 +1829,13 @@ export default function CreatePost({ onSuccess, pageHandle, pageAvatar, pageName
           <button
             type="submit"
             disabled={isLoading || isOverWordLimit || (!text.trim() && photoFiles.length === 0 && !videoFile && !showPoll && !docFile && !audioFile)}
-            className="px-6 py-2 rounded-full bg-[var(--its-red)] text-white text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center gap-2"
+            className="ff-composer-submit px-6 py-2 bg-[var(--its-red)] text-white text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center gap-2"
           >
             {isLoading && <Loader2 size={13} className="animate-spin" />}
             {isSubmitting ? (uploading ? "Uploading..." : "Posting...") : scheduledAt ? "Schedule" : "Post"}
           </button>
         </div>
 
-          </div>{/* end modal body */}
           </form>
         </DialogContent>
       </Dialog>
