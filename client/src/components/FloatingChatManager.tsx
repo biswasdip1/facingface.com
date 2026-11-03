@@ -4,6 +4,8 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { MessageCircle, Minus, Phone, Search, Send, Smile, Video, X } from "lucide-react";
 import CallModal from "@/components/CallModal";
+import ChatMessageContent from "@/components/ChatMessageContent";
+import ChatAttachment from "@/components/ChatAttachment";
 
 type Peer = {
   id: number;
@@ -175,13 +177,8 @@ function FloatingConversation({
               return (
                 <div key={message.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[82%] rounded-2xl px-3 py-2 text-sm shadow-sm ${mine ? "rounded-br-md bg-primary text-primary-foreground" : "rounded-bl-md border border-border bg-card text-foreground"}`}>
-                    {message.text && <p className="whitespace-pre-wrap break-words leading-relaxed">{message.text}</p>}
-                    {message.fileUrl && message.fileType?.startsWith("image/") && (
-                      <img src={message.fileUrl} alt={message.fileName ?? "Shared image"} className="mt-1 max-h-44 max-w-full rounded-xl object-cover" />
-                    )}
-                    {message.fileUrl && !message.fileType?.startsWith("image/") && (
-                      <a href={message.fileUrl} target="_blank" rel="noreferrer" className="block max-w-[220px] truncate text-xs underline">{message.fileName ?? "Open attachment"}</a>
-                    )}
+                    {message.text && <ChatMessageContent text={message.text} />}
+                    {message.fileUrl && <ChatAttachment url={message.fileUrl} type={message.fileType} name={message.fileName} compact />}
                     <p className={`mt-1 text-[10px] ${mine ? "text-primary-foreground/70" : "text-muted-foreground"}`}>{shortTime(message.createdAt)}</p>
                   </div>
                 </div>

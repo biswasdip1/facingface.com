@@ -1,543 +1,508 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useParams, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import {
-  Mic, MicOff, Video, VideoOff, PhoneOff, Monitor, Users, Maximize2,
+  Mic, MicOff, Video, VideoOff, PhoneOff, Monitor, Users, Copy,
+  ArrowLeft, Loader2, Volume2, RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import {
+  GROUP_CALL_LIMIT, GroupCallMedia, groupMediaConstraints, groupMediaError,
+  stopGroupStream, type GroupPeerView,
+} from "@/lib/groupCallMedia";
 
-function getInitials(name: string) {
-  return name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2);
-}
-
-// ─── WebRTC peer connection management ───────────────────────────────────────
-
-const ICE_SERVERS = [
-  { urls: "stun:stun.l.google.com:19302" },
-  { urls: "stun:stun1.l.google.com:19302" },
-];
-
-interface RemoteStream {
-  userId: number;
-  name: string;
-  avatar: string | null;
+type JoinAttempt = {
+  roomId: number;
+  cancelled: boolean;
+  joinSent: boolean;
+  joinSettled: boolean;
+  leavePromise?: Promise<void>;
   stream: MediaStream | null;
-  audioMuted: boolean;
-  videoMuted: boolean;
+  media: GroupCallMedia | null;
+};
+type TileParticipant = GroupPeerView & { isLocal: boolean };
+
+function initials(name: string) {
+  return name.trim().split(/\s+/).map(part => part[0] ?? "").join("").toUpperCase().slice(0, 2) || "?";
 }
 
 export default function GroupCall() {
-  const { roomId: roomIdStr } = useParams<{ roomId: string }>();
-  const roomId = parseInt(roomIdStr ?? "0", 10);
-  const { user } = useAuth();
+  const { roomId: rawRoomId } = useParams<{ roomId: string }>();
+  const roomId = Number(rawRoomId);
+  const validRoomId = Number.isInteger(roomId) && roomId > 0;
+  const { user, loading: authLoading } = useAuth();
   const [, navigate] = useLocation();
   const utils = trpc.useUtils();
-
-  // Local state
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [audioEnabled, setAudioEnabled] = useState(true);
-  const [videoEnabled, setVideoEnabled] = useState(true);
-  const [remoteStreams, setRemoteStreams] = useState<Map<number, RemoteStream>>(new Map());
-  const [isJoined, setIsJoined] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [screenSharing, setScreenSharing] = useState(false);
-  const [fullscreenUserId, setFullscreenUserId] = useState<number | null>(null);
-
-  const localVideoRef = useRef<HTMLVideoElement>(null);
-  const peerConnections = useRef<Map<number, RTCPeerConnection>>(new Map());
-  const pollingInterval = useRef<ReturnType<typeof setInterval> | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
-
-  // Queries
-  const { data: roomData, isLoading } = trpc.calls.getRoom.useQuery(
-    { roomId },
-    { enabled: !!roomId && isJoined, refetchInterval: 5000 }
-  );
-
-  // Mutations
   const joinMutation = trpc.calls.join.useMutation();
   const leaveMutation = trpc.calls.leave.useMutation();
   const sendSignalMutation = trpc.calls.sendSignal.useMutation();
 
-  // Signal polling
-  const { data: signalData } = trpc.calls.pollSignals.useQuery(
+  const [joined, setJoined] = useState(false);
+  const [joining, setJoining] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<MediaStream | null>(null);
+  const [peers, setPeers] = useState<GroupPeerView[]>([]);
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  const [videoEnabled, setVideoEnabled] = useState(true);
+  const [sharing, setSharing] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [relayWarning, setRelayWarning] = useState(false);
+  const [pollWarning, setPollWarning] = useState(false);
+  const [soundBlocked, setSoundBlocked] = useState(false);
+
+  const mounted = useRef(false);
+  const currentRoomId = useRef(roomId);
+  currentRoomId.current = roomId;
+  const pendingJoin = useRef<JoinAttempt | null>(null);
+  const activeAttempt = useRef<JoinAttempt | null>(null);
+  const mediaRef = useRef<GroupCallMedia | null>(null);
+  const audioElements = useRef(new Map<number, HTMLAudioElement>());
+  // Do not make media effects depend on mutation/query object identity. Polls
+  // update these refs, not the lifetime of a running RTCPeerConnection.
+  const api = useRef({
+    join: joinMutation.mutateAsync,
+    leave: leaveMutation.mutateAsync,
+    sendSignal: sendSignalMutation.mutateAsync,
+    getRoom: utils.calls.getRoom.fetch,
+    pollSignals: utils.calls.pollSignals.fetch,
+    iceServers: utils.calls.iceServers.fetch,
+  });
+  api.current = {
+    join: joinMutation.mutateAsync,
+    leave: leaveMutation.mutateAsync,
+    sendSignal: sendSignalMutation.mutateAsync,
+    getRoom: utils.calls.getRoom.fetch,
+    pollSignals: utils.calls.pollSignals.fetch,
+    iceServers: utils.calls.iceServers.fetch,
+  };
+
+  // Metadata is authorized for group members before Join. No media request is
+  // made from this query or from any effect.
+  const roomQuery = trpc.calls.getRoom.useQuery(
     { roomId },
-    { enabled: !!roomId && isJoined, refetchInterval: 1000 }
+    { enabled: validRoomId && !!user, refetchInterval: 4000, retry: false, refetchOnWindowFocus: true }
   );
+  const roomData = roomQuery.data;
+  const roomDataRef = useRef(roomData);
+  roomDataRef.current = roomData;
+  const audioOnly = roomData?.room.type === "audio";
+  const roomEnded = roomData?.room.status === "ended";
+  const groupId = roomData?.room.groupId;
+  const returnUrl = groupId ? `/messages?tab=groups&group=${groupId}` : "/messages?tab=groups";
+  const otherCount = roomData?.participants.filter(p => p.userId !== user?.id).length ?? 0;
+  const isFull = otherCount >= GROUP_CALL_LIMIT;
 
-  // ── Process incoming signals ──────────────────────────────────────────────
+  function isCurrent(attempt: JoinAttempt): boolean {
+    return mounted.current && !attempt.cancelled && currentRoomId.current === attempt.roomId && activeAttempt.current === attempt;
+  }
+
+  async function notifyLeave(attempt: JoinAttempt): Promise<void> {
+    // Never race leave ahead of an in-flight join: its late success would
+    // otherwise leave a ghost participant behind after Cancel/unmount.
+    if (!attempt.joinSent || !attempt.joinSettled) return;
+    if (!attempt.leavePromise) {
+      attempt.leavePromise = api.current.leave({ roomId: attempt.roomId }).then(() => {}, () => {});
+    }
+    await attempt.leavePromise;
+  }
+
+  function dispose(attempt: JoinAttempt | null): void {
+    if (!attempt) return;
+    attempt.cancelled = true;
+    attempt.media?.close();
+    stopGroupStream(attempt.stream);
+    attempt.stream = null;
+    if (mediaRef.current === attempt.media) mediaRef.current = null;
+    if (activeAttempt.current === attempt) activeAttempt.current = null;
+    void notifyLeave(attempt);
+  }
+
+  function clearCall(): void {
+    dispose(activeAttempt.current);
+    dispose(pendingJoin.current);
+    setJoined(false);
+    setPreview(null);
+    setPeers([]);
+    setSharing(false);
+    setShareBusy(false);
+    setSoundBlocked(false);
+    setPollWarning(false);
+    setRelayWarning(false);
+  }
+
   useEffect(() => {
-    if (!signalData?.signals || !user) return;
-    for (const signal of signalData.signals) {
-      handleIncomingSignal(signal.fromUserId, signal.type, JSON.parse(signal.payload));
-    }
-  }, [signalData]);
-
-  // ── Handle participant changes ────────────────────────────────────────────
-  useEffect(() => {
-    if (!roomData?.participants || !user || !isJoined) return;
-    const currentParticipants = roomData.participants;
-    const currentIds = new Set(currentParticipants.map(p => p.userId));
-
-    // Remove disconnected participants
-    setRemoteStreams(prev => {
-      const next = new Map(prev);
-      Array.from(next.keys()).forEach(uid => {
-        if (!currentIds.has(uid) && uid !== user.id) {
-          next.delete(uid);
-          const pc = peerConnections.current.get(uid);
-          if (pc) { pc.close(); peerConnections.current.delete(uid); }
-        }
-      });
-      return next;
-    });
-
-    // Initiate connections to new participants
-    for (const p of currentParticipants) {
-      if (p.userId === user.id) continue;
-      if (!peerConnections.current.has(p.userId)) {
-        // We initiate if our ID is smaller (prevents duplicate offers)
-        if (user.id < p.userId) {
-          initiateCall(p.userId, p.user);
-        } else {
-          // Register remote stream slot so they can see us
-          setRemoteStreams(prev => {
-            if (prev.has(p.userId)) return prev;
-            const next = new Map(prev);
-            next.set(p.userId, {
-              userId: p.userId,
-              name: p.user.name ?? "User",
-              avatar: p.user.avatar ?? null,
-              stream: null,
-              audioMuted: false,
-              videoMuted: false,
-            });
-            return next;
-          });
-        }
-      }
-    }
-  }, [roomData?.participants, isJoined]);
-
-  // ── Create peer connection ────────────────────────────────────────────────
-  const createPeerConnection = useCallback((remoteUserId: number, remoteUser: { name: string | null; avatar: string | null }) => {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-
-    // Add local tracks
-    if (localStreamRef.current) {
-      for (const track of localStreamRef.current.getTracks()) {
-        pc.addTrack(track, localStreamRef.current);
-      }
-    }
-
-    // ICE candidates
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        sendSignalMutation.mutate({
-          roomId,
-          toUserId: remoteUserId,
-          type: "ice-candidate",
-          payload: JSON.stringify(event.candidate),
-        });
-      }
-    };
-
-    // Remote stream
-    pc.ontrack = (event) => {
-      const [stream] = event.streams;
-      setRemoteStreams(prev => {
-        const next = new Map(prev);
-        const existing = next.get(remoteUserId);
-        next.set(remoteUserId, {
-          userId: remoteUserId,
-          name: existing?.name ?? remoteUser.name ?? "User",
-          avatar: existing?.avatar ?? remoteUser.avatar ?? null,
-          stream,
-          audioMuted: existing?.audioMuted ?? false,
-          videoMuted: existing?.videoMuted ?? false,
-        });
-        return next;
-      });
-    };
-
-    peerConnections.current.set(remoteUserId, pc);
-    return pc;
-  }, [roomId, sendSignalMutation]);
-
-  // ── Initiate call to a peer ───────────────────────────────────────────────
-  const initiateCall = useCallback(async (remoteUserId: number, remoteUser: { name: string | null; avatar: string | null }) => {
-    const pc = createPeerConnection(remoteUserId, remoteUser);
-    setRemoteStreams(prev => {
-      const next = new Map(prev);
-      if (!next.has(remoteUserId)) {
-        next.set(remoteUserId, { userId: remoteUserId, name: remoteUser.name ?? "User", avatar: remoteUser.avatar ?? null, stream: null, audioMuted: false, videoMuted: false });
-      }
-      return next;
-    });
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    sendSignalMutation.mutate({
-      roomId,
-      toUserId: remoteUserId,
-      type: "offer",
-      payload: JSON.stringify(offer),
-    });
-  }, [createPeerConnection, roomId, sendSignalMutation]);
-
-  // ── Handle incoming signal ────────────────────────────────────────────────
-  const handleIncomingSignal = useCallback(async (fromUserId: number, type: string, payload: unknown) => {
-    if (!user) return;
-    let pc = peerConnections.current.get(fromUserId);
-
-    if (type === "offer") {
-      if (!pc) {
-        // Find participant info
-        const participant = roomData?.participants.find(p => p.userId === fromUserId);
-        pc = createPeerConnection(fromUserId, { name: participant?.user.name ?? "User", avatar: participant?.user.avatar ?? null });
-      }
-      await pc.setRemoteDescription(new RTCSessionDescription(payload as RTCSessionDescriptionInit));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      sendSignalMutation.mutate({
-        roomId,
-        toUserId: fromUserId,
-        type: "answer",
-        payload: JSON.stringify(answer),
-      });
-    } else if (type === "answer" && pc) {
-      await pc.setRemoteDescription(new RTCSessionDescription(payload as RTCSessionDescriptionInit));
-    } else if (type === "ice-candidate" && pc) {
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(payload as RTCIceCandidateInit));
-      } catch {
-        // ignore stale candidates
-      }
-    }
-  }, [user, roomData, createPeerConnection, roomId, sendSignalMutation]);
-
-  // ── Join the call ─────────────────────────────────────────────────────────
-  const joinCall = useCallback(async () => {
-    setIsConnecting(true);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-      setLocalStream(stream);
-      localStreamRef.current = stream;
-      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
-      await joinMutation.mutateAsync({ roomId });
-      setIsJoined(true);
-    } catch (err) {
-      toast.error("Could not access camera/microphone. Please check permissions.");
-      console.error(err);
-    } finally {
-      setIsConnecting(false);
-    }
-  }, [roomId, joinMutation]);
-
-  // ── Leave the call ────────────────────────────────────────────────────────
-  const leaveCall = useCallback(async () => {
-    // Stop local tracks
-    localStream?.getTracks().forEach(t => t.stop());
-    localStreamRef.current = null;
-    // Close all peer connections
-    Array.from(peerConnections.current.values()).forEach(pc => pc.close());
-    peerConnections.current.clear();
-    // Notify server
-    await leaveMutation.mutateAsync({ roomId });
-    navigate("/groups");
-  }, [localStream, roomId, leaveMutation, navigate]);
-
-  // ── Toggle audio ──────────────────────────────────────────────────────────
-  const toggleAudio = () => {
-    if (!localStream) return;
-    const enabled = !audioEnabled;
-    localStream.getAudioTracks().forEach(t => { t.enabled = enabled; });
-    setAudioEnabled(enabled);
-  };
-
-  // ── Toggle video ──────────────────────────────────────────────────────────
-  const toggleVideo = () => {
-    if (!localStream) return;
-    const enabled = !videoEnabled;
-    localStream.getVideoTracks().forEach(t => { t.enabled = enabled; });
-    setVideoEnabled(enabled);
-  };
-
-  // ── Screen share ──────────────────────────────────────────────────────────
-  const toggleScreenShare = async () => {
-    if (!localStream) return;
-    if (!screenSharing) {
-      try {
-        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-        const screenTrack = screenStream.getVideoTracks()[0];
-        Array.from(peerConnections.current.values()).forEach(pc => {
-          const sender = pc.getSenders().find((s: RTCRtpSender) => s.track?.kind === "video");
-          if (sender) sender.replaceTrack(screenTrack);
-        });
-        screenTrack.onended = () => setScreenSharing(false);
-        setScreenSharing(true);
-      } catch {
-        toast.error("Screen sharing not available.");
-      }
-    } else {
-      const camTrack = localStream.getVideoTracks()[0];
-      Array.from(peerConnections.current.values()).forEach(pc => {
-        const sender = pc.getSenders().find((s: RTCRtpSender) => s.track?.kind === "video");
-        if (sender && camTrack) sender.replaceTrack(camTrack);
-      });
-      setScreenSharing(false);
-    }
-  };
-
-  // ── Set local video ref ───────────────────────────────────────────────────
-  useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
-    }
-  }, [localStream]);
-
-  // ── Cleanup on unmount ────────────────────────────────────────────────────
-  useEffect(() => {
+    mounted.current = true;
+    setJoined(false);
+    setPreview(null);
+    setPeers([]);
+    setSharing(false);
+    setShareBusy(false);
+    setError(null);
+    setSoundBlocked(false);
+    setPollWarning(false);
+    setRelayWarning(false);
+    setJoining(!!pendingJoin.current);
     return () => {
-      localStreamRef.current?.getTracks().forEach(t => t.stop());
-      Array.from(peerConnections.current.values()).forEach(pc => pc.close());
-      if (pollingInterval.current) clearInterval(pollingInterval.current);
+      mounted.current = false;
+      const active = activeAttempt.current;
+      const pending = pendingJoin.current;
+      if (active?.roomId === roomId) dispose(active);
+      if (pending?.roomId === roomId) dispose(pending);
     };
-  }, []);
+    // Lifetime is the route only, not room metadata or tRPC hook objects.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId]);
 
-  // ─── Pre-join screen ──────────────────────────────────────────────────────
-  if (!isJoined) {
+  useEffect(() => {
+    const media = mediaRef.current;
+    if (!joined || !media || !roomData) return;
+    if (roomData.room.status === "ended") {
+      clearCall();
+      setError("This call has ended. You can return to your group chat.");
+      return;
+    }
+    void media.syncParticipants(roomData.participants).catch(() => {
+      if (mediaRef.current === media && mounted.current) setPollWarning(true);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [joined, roomData]);
+
+  useEffect(() => {
+    if (!joined) return;
+    const media = mediaRef.current;
+    const attempt = activeAttempt.current;
+    if (!media || !attempt) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      if (cancelled || !isCurrent(attempt) || mediaRef.current !== media) return;
+      try {
+        const batch = await api.current.pollSignals({ roomId: attempt.roomId }, { staleTime: 0 });
+        if (cancelled || !isCurrent(attempt) || mediaRef.current !== media) return;
+        await media.processSignals(batch.signals);
+        if (!cancelled && isCurrent(attempt)) setPollWarning(false);
+      } catch (cause) {
+        if (!cancelled && isCurrent(attempt)) {
+          const code = (cause as { data?: { code?: string } })?.data?.code;
+          if (code === "FORBIDDEN" || code === "NOT_FOUND" || code === "UNAUTHORIZED") {
+            clearCall();
+            setError("This call is no longer available to you. Return to your group chat.");
+            return;
+          }
+          setPollWarning(true);
+        }
+      } finally {
+        // Recursive timeout: no overlapping polls or signal-processing batches.
+        if (!cancelled && isCurrent(attempt) && mediaRef.current === media)
+          timer = setTimeout(poll, 900);
+      }
+    };
+    void poll();
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [joined, roomId]);
+
+  async function joinCall(): Promise<void> {
+    if (pendingJoin.current || mediaRef.current || !user || !roomData || roomEnded || !validRoomId) return;
+    const attempt: JoinAttempt = {
+      roomId, cancelled: false, joinSent: false, joinSettled: false, stream: null, media: null,
+    };
+    pendingJoin.current = attempt; // Synchronous lock prevents double clicks.
+    activeAttempt.current = attempt;
+    setJoining(true);
+    setError(null);
+    setAudioEnabled(true);
+    setVideoEnabled(!audioOnly);
+    let stage: "room" | "ice" | "media" | "join" = "room";
+    let completed = false;
+    let callType: "audio" | "video" = audioOnly ? "audio" : "video";
+    try {
+      const freshRoom = await api.current.getRoom({ roomId: attempt.roomId }, { staleTime: 0 });
+      if (!isCurrent(attempt)) return;
+      if (freshRoom.room.status === "ended") throw new Error("This call has ended. Return to your group chat.");
+      if (freshRoom.participants.filter(p => p.userId !== user.id).length >= GROUP_CALL_LIMIT)
+        throw new Error("This call is full. Up to four people can join, including you.");
+      callType = freshRoom.room.type;
+      stage = "ice";
+      const relay = await api.current.iceServers(undefined, { staleTime: 0 });
+      if (!isCurrent(attempt)) return;
+      if (!relay.iceServers.length) throw new Error("Call connection settings are unavailable. Please try joining again.");
+      stage = "media";
+      if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === "undefined")
+        throw new Error("Calling isn't supported here. Open FacingFace in a current browser over a secure connection.");
+      const stream = await navigator.mediaDevices.getUserMedia(groupMediaConstraints(callType));
+      attempt.stream = stream;
+      if (!isCurrent(attempt)) { stopGroupStream(stream); return; }
+      stage = "join";
+      attempt.joinSent = true;
+      try { await api.current.join({ roomId: attempt.roomId }); }
+      finally { attempt.joinSettled = true; }
+      if (!isCurrent(attempt)) return;
+      const media = new GroupCallMedia({
+        userId: user.id, stream, iceServers: relay.iceServers,
+        sendSignal: (toUserId, type, payload) => api.current.sendSignal({ roomId: attempt.roomId, toUserId, type, payload }),
+        onPeers: next => { if (isCurrent(attempt)) setPeers(next); },
+        onPreview: (next, isSharing) => {
+          if (isCurrent(attempt)) { setPreview(next); setSharing(isSharing); }
+        },
+      });
+      attempt.media = media;
+      mediaRef.current = media;
+      setPreview(stream);
+      setRelayWarning(!relay.relayConfigured);
+      setVideoEnabled(callType === "video");
+      setJoined(true);
+      completed = true;
+      // A new poll refreshes this snapshot; establish known peer slots now.
+      void media.syncParticipants(freshRoom.participants).catch(() => {
+        if (isCurrent(attempt)) setPollWarning(true);
+      });
+      void utils.calls.getRoom.invalidate({ roomId: attempt.roomId });
+    } catch (cause) {
+      if (isCurrent(attempt)) {
+        setError(stage === "media" ? groupMediaError(cause, callType) :
+          cause instanceof Error ? cause.message : "Could not join this call. Please try again.");
+      }
+    } finally {
+      if (!completed) {
+        dispose(attempt);
+        await notifyLeave(attempt);
+      }
+      if (pendingJoin.current === attempt) pendingJoin.current = null;
+      if (mounted.current && currentRoomId.current === attempt.roomId) setJoining(false);
+    }
+  }
+
+  async function leaveCall(goBack = true): Promise<void> {
+    const attempt = activeAttempt.current ?? pendingJoin.current;
+    clearCall(); // Release hardware immediately, before any network work.
+    if (attempt?.joinSettled) await notifyLeave(attempt);
+    else if (!attempt && roomDataRef.current?.participants.some(p => p.userId === user?.id)) {
+      // The creator may already occupy a server seat without having used media.
+      await api.current.leave({ roomId }).catch(() => {});
+    }
+    if (goBack && mounted.current) navigate(returnUrl);
+    else if (mounted.current) {
+      setError(null);
+      void utils.calls.getRoom.invalidate({ roomId });
+    }
+  }
+
+  function toggleAudio(): void {
+    const next = !audioEnabled;
+    mediaRef.current?.setAudioEnabled(next);
+    setAudioEnabled(next);
+  }
+  function toggleVideo(): void {
+    const next = !videoEnabled;
+    mediaRef.current?.setVideoEnabled(next);
+    setVideoEnabled(next);
+  }
+  async function toggleShare(): Promise<void> {
+    const media = mediaRef.current;
+    if (!media || shareBusy) return;
+    setShareBusy(true);
+    try {
+      if (media.sharing) await media.stopScreenShare();
+      else await media.startScreenShare();
+    } catch (cause) {
+      if (mediaRef.current === media && mounted.current)
+        toast.error(cause instanceof Error ? cause.message : "Screen sharing is unavailable. Try again.");
+    } finally {
+      if (mediaRef.current === media && mounted.current) setShareBusy(false);
+    }
+  }
+  async function copyInvite(): Promise<void> {
+    const link = `${window.location.origin}/calls/group/${roomId}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      toast.success("Call link copied. Only members of this group can join.");
+    } catch { toast.error("Couldn't copy the link. Copy this page's address from your browser instead."); }
+  }
+  async function enableSound(): Promise<void> {
+    // All play calls happen in the click's activation stack, including on iOS.
+    const results = await Promise.all(Array.from(audioElements.current.values()).map(element => {
+      element.muted = false;
+      return element.play().then(() => true, () => false);
+    }));
+    setSoundBlocked(results.some(result => !result));
+  }
+  function registerAudio(userId: number, element: HTMLAudioElement | null): void {
+    if (element) audioElements.current.set(userId, element);
+    else audioElements.current.delete(userId);
+  }
+
+  const participants: TileParticipant[] = [{
+    userId: user?.id ?? 0,
+    name: user?.name ?? "You",
+    avatar: user?.avatar ?? null,
+    stream: preview,
+    status: audioEnabled ? (audioOnly ? "Microphone on" : sharing ? "Sharing screen" : videoEnabled ? "Camera and microphone on" : "Camera off") : "Microphone muted",
+    needsRetry: false,
+    isLocal: true,
+  }, ...peers.slice(0, GROUP_CALL_LIMIT - 1).map(peer => ({ ...peer, isLocal: false }))];
+  const supportsShare = typeof navigator !== "undefined" && !!navigator.mediaDevices?.getDisplayMedia;
+
+  if (!joined) {
+    const unavailable = !validRoomId || (!authLoading && !user) || !!roomQuery.error || roomEnded;
+    const loading = authLoading || (!!user && roomQuery.isLoading);
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-card border rounded-2xl p-8 text-center space-y-6 shadow-lg">
-          <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
-            <Video className="w-8 h-8 text-primary" />
+      <main className="min-h-screen bg-background text-foreground flex items-center justify-center p-4" data-testid="group-call-prejoin">
+        <section className="w-full max-w-lg rounded-2xl border bg-card p-6 sm:p-8 shadow-lg space-y-6" aria-labelledby="group-call-heading">
+          <div className="flex items-center gap-4">
+            <div className="rounded-2xl bg-primary/10 p-4 text-primary">{audioOnly ? <Mic className="h-7 w-7" /> : <Video className="h-7 w-7" />}</div>
+            <div><h1 id="group-call-heading" className="text-2xl font-bold">Group {audioOnly ? "audio" : "video"} call</h1>
+              <p className="text-sm text-muted-foreground">{validRoomId ? `Room #${roomId} · Up to 4 people` : "Invalid call link"}</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-bold">Group Call</h1>
-            <p className="text-muted-foreground text-sm mt-1">Room #{roomId}</p>
+          {loading ? <p role="status" className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading call details…</p> :
+            unavailable ? <p role="alert" className="text-sm text-muted-foreground">{roomEnded ? "This call has ended." : !user ? "Sign in to FacingFace to join this call." : roomQuery.error?.message ?? "This call link is not valid."}</p> : <>
+              <p className="text-sm text-muted-foreground">{audioOnly ? "Only your microphone will be requested when you choose Join call. Your camera stays off." : "Your camera and microphone are requested only when you choose Join call."} Nothing is turned on automatically.</p>
+              <div className="rounded-xl bg-muted/50 p-4 space-y-3">
+                <div className="flex items-center justify-between text-sm"><span className="flex items-center gap-2"><Users className="h-4 w-4" /> In this room</span><span data-testid="group-call-prejoin-count">{roomData?.participants.length ?? 0} / 4</span></div>
+                {roomData?.participants.length ? <div className="flex flex-wrap gap-2">{roomData.participants.slice(0, 4).map(participant => <span key={participant.userId} className="rounded-full border bg-background px-3 py-1 text-xs">{participant.user.name ?? "Group member"}{participant.userId === user?.id ? " (You)" : ""}</span>)}</div> : <p className="text-xs text-muted-foreground">Be the first to join.</p>}
+              </div>
+              <p className="text-xs text-muted-foreground">Only members of this group can open this link and join. Copying the link does not send an invitation or message.</p>
+              {isFull && <p role="alert" className="text-sm text-destructive">This call is full. Four people can join, including you.</p>}
+            </>}
+          {error && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive" data-testid="group-call-error">{error}</p>}
+          <div className="flex flex-wrap gap-3">
+            <Button variant="outline" className="flex-1" onClick={() => { void leaveCall(); }} data-testid="group-call-cancel"><ArrowLeft className="h-4 w-4 mr-2" />{roomEnded ? "Back to group" : joining ? "Cancel joining" : "Back to group"}</Button>
+            {!unavailable && <Button className="flex-1" onClick={() => { void joinCall(); }} disabled={joining || loading || isFull || !roomData} data-testid="group-call-join">{joining ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Joining…</> : "Join call"}</Button>}
           </div>
-          <p className="text-sm text-muted-foreground">
-            Your camera and microphone will be requested when you join.
-          </p>
-          <div className="flex gap-3">
-            <Button variant="outline" className="flex-1" onClick={() => navigate("/groups")}>
-              Cancel
-            </Button>
-            <Button className="flex-1" onClick={joinCall} disabled={isConnecting}>
-              {isConnecting ? "Connecting..." : "Join Call"}
-            </Button>
-          </div>
-        </div>
-      </div>
+          {!unavailable && !loading && <Button variant="ghost" className="w-full" onClick={() => { void copyInvite(); }} data-testid="group-call-copy-invite"><Copy className="h-4 w-4 mr-2" /> Copy call link</Button>}
+        </section>
+      </main>
     );
   }
 
-  // ─── Active call screen ───────────────────────────────────────────────────
-  const allParticipants = [
-    // Local user tile
-    { userId: user?.id ?? 0, name: user?.name ?? "You", avatar: null, stream: localStream, isLocal: true },
-    // Remote participants
-    ...Array.from(remoteStreams.values()).map(r => ({ ...r, isLocal: false })),
-  ];
-
-  const focusedParticipant = fullscreenUserId !== null
-    ? allParticipants.find(p => p.userId === fullscreenUserId)
-    : null;
-
   return (
-    <div className="min-h-screen bg-zinc-950 flex flex-col">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-zinc-900/80 backdrop-blur">
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-          <span className="text-white text-sm font-medium">Live Call</span>
-          <Badge variant="secondary" className="text-xs">{allParticipants.length} participants</Badge>
+    <main className="fixed inset-0 z-[80] h-[100dvh] min-h-0 overflow-y-auto bg-zinc-950 text-white flex flex-col" data-testid="group-call-active">
+      <header className="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-4 sm:px-6 bg-zinc-900/80 pt-[max(1rem,env(safe-area-inset-top))]">
+        <div><h1 className="text-lg font-semibold">Group {audioOnly ? "audio" : "video"} call</h1><p className="text-xs text-zinc-400">Room #{roomId} · Only group members can join</p></div>
+        <div className="flex items-center gap-3"><span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-sm" data-testid="group-call-participant-count"><Users className="h-4 w-4" />{participants.length} / 4</span><Button variant="ghost" size="sm" className="text-zinc-200 hover:bg-white/10 hover:text-white" onClick={() => { void copyInvite(); }} data-testid="group-call-copy-invite"><Copy className="h-4 w-4 mr-2" />Copy link</Button></div>
+      </header>
+      <div aria-live="polite" className="shrink-0 mx-auto w-full max-w-6xl px-4">
+        {relayWarning && <p className="mt-3 rounded-lg border border-amber-400/20 bg-amber-400/10 p-3 text-xs text-amber-100">A relay server is not currently configured. If someone cannot connect across networks, try rejoining or ask your administrator to check TURN settings.</p>}
+        {(pollWarning || roomQuery.isError) && <p className="mt-3 rounded-lg bg-amber-400/10 p-3 text-sm text-amber-100">Connection to the call service was interrupted. Retrying… Your media stays on. <button className="underline font-medium" onClick={() => { void leaveCall(false); }} data-testid="group-call-rejoin">Leave and rejoin</button></p>}
+        {soundBlocked && <Button className="mt-3" onClick={() => { void enableSound(); }} data-testid="group-call-enable-sound"><Volume2 className="h-4 w-4 mr-2" />Turn on sound</Button>}
+      </div>
+      <section className="flex-1 w-full max-w-6xl mx-auto p-3 sm:p-6" aria-label="Call participants">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4" data-testid="group-call-grid">
+          {participants.map(participant => <VideoTile key={participant.userId} participant={participant} videoEnabled={participant.isLocal ? videoEnabled && !audioOnly : undefined} audioEnabled={participant.isLocal ? audioEnabled : undefined} registerAudio={registerAudio} onSoundBlocked={() => { if (mounted.current && joined) setSoundBlocked(true); }} onRetry={() => { void leaveCall(false); }} />)}
+          {participants.length === 1 && <div className="flex aspect-[4/3] items-center justify-center rounded-2xl border border-dashed border-white/15 bg-zinc-900/50 p-3 sm:p-6 text-center"><div><Users className="h-7 w-7 sm:h-9 sm:w-9 mx-auto text-zinc-500 mb-2" /><p className="text-xs sm:text-base font-medium text-zinc-200">Waiting for group members</p><p className="mt-1 text-[11px] sm:text-sm text-zinc-400">Copy the call link to share it yourself.</p></div></div>}
         </div>
-        <div className="flex items-center gap-2">
-          {fullscreenUserId !== null && (
-            <Button variant="ghost" size="sm" className="text-white" onClick={() => setFullscreenUserId(null)}>
-              <Maximize2 className="w-4 h-4 mr-1" /> Exit Focus
-            </Button>
-          )}
+      </section>
+      <footer className="shrink-0 sticky bottom-0 border-t border-white/10 bg-zinc-900/95 px-3 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur">
+        <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6">
+          <ControlButton label={audioEnabled ? "Mute microphone" : "Unmute microphone"} active={audioEnabled} onClick={toggleAudio} testId="group-call-toggle-mic">{audioEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}</ControlButton>
+          {!audioOnly && <ControlButton label={videoEnabled ? "Turn camera off" : "Turn camera on"} active={videoEnabled} onClick={toggleVideo} testId="group-call-toggle-camera">{videoEnabled ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}</ControlButton>}
+          {!audioOnly && supportsShare && <ControlButton label={sharing ? "Stop sharing" : "Share screen"} active={!sharing} disabled={shareBusy} onClick={() => { void toggleShare(); }} testId="group-call-share-screen">{shareBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Monitor className="h-5 w-5" />}</ControlButton>}
+          <ControlButton label="Leave call" danger onClick={() => { void leaveCall(); }} testId="group-call-leave"><PhoneOff className="h-5 w-5" /></ControlButton>
         </div>
-      </div>
-
-      {/* Video grid */}
-      <div className="flex-1 p-4 overflow-auto">
-        {focusedParticipant ? (
-          // Focused view
-          <div className="flex flex-col gap-3 h-full">
-            <VideoTile participant={focusedParticipant} large />
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {allParticipants.filter(p => p.userId !== fullscreenUserId).map(p => (
-                <VideoTile key={p.userId} participant={p} small onClick={() => setFullscreenUserId(p.userId)} />
-              ))}
-            </div>
-          </div>
-        ) : (
-          // Grid view
-          <div className={cn(
-            "grid gap-3 h-full",
-            allParticipants.length === 1 ? "grid-cols-1" :
-            allParticipants.length === 2 ? "grid-cols-2" :
-            allParticipants.length <= 4 ? "grid-cols-2" :
-            allParticipants.length <= 6 ? "grid-cols-3" : "grid-cols-4"
-          )}>
-            {allParticipants.map(p => (
-              <VideoTile
-                key={p.userId}
-                participant={p}
-                onClick={() => setFullscreenUserId(p.userId)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Controls */}
-      <div className="flex items-center justify-center gap-4 py-5 bg-zinc-900/80 backdrop-blur">
-        <ControlButton
-          active={audioEnabled}
-          activeIcon={<Mic className="w-5 h-5" />}
-          inactiveIcon={<MicOff className="w-5 h-5" />}
-          activeLabel="Mute"
-          inactiveLabel="Unmute"
-          onClick={toggleAudio}
-        />
-        <ControlButton
-          active={videoEnabled}
-          activeIcon={<Video className="w-5 h-5" />}
-          inactiveIcon={<VideoOff className="w-5 h-5" />}
-          activeLabel="Stop Video"
-          inactiveLabel="Start Video"
-          onClick={toggleVideo}
-        />
-        <ControlButton
-          active={!screenSharing}
-          activeIcon={<Monitor className="w-5 h-5" />}
-          inactiveIcon={<Monitor className="w-5 h-5" />}
-          activeLabel="Share Screen"
-          inactiveLabel="Stop Share"
-          onClick={toggleScreenShare}
-          variant="secondary"
-        />
-        <button
-          className="flex flex-col items-center gap-1 group"
-          onClick={leaveCall}
-        >
-          <div className="w-12 h-12 rounded-full bg-red-600 hover:bg-red-700 flex items-center justify-center transition-colors">
-            <PhoneOff className="w-5 h-5 text-white" />
-          </div>
-          <span className="text-xs text-zinc-400">Leave</span>
-        </button>
-      </div>
-    </div>
+      </footer>
+    </main>
   );
 }
 
-// ─── Video Tile Component ─────────────────────────────────────────────────────
-
-function VideoTile({
-  participant,
-  large,
-  small,
-  onClick,
-}: {
-  participant: { userId: number; name: string; avatar: string | null; stream: MediaStream | null; isLocal: boolean };
-  large?: boolean;
-  small?: boolean;
-  onClick?: () => void;
+function VideoTile({ participant, videoEnabled, audioEnabled, registerAudio, onSoundBlocked, onRetry }: {
+  participant: TileParticipant;
+  videoEnabled?: boolean;
+  audioEnabled?: boolean;
+  registerAudio: (userId: number, element: HTMLAudioElement | null) => void;
+  onSoundBlocked: () => void;
+  onRetry: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const callbacks = useRef({ registerAudio, onSoundBlocked });
+  callbacks.current = { registerAudio, onSoundBlocked };
+  const [, updateTrackState] = useState(0);
+  const stream = participant.stream;
+  const userId = participant.userId;
+  const isLocal = participant.isLocal;
 
   useEffect(() => {
-    if (videoRef.current && participant.stream) {
-      videoRef.current.srcObject = participant.stream;
+    let disposed = false;
+    const video = videoRef.current;
+    if (video) {
+      video.srcObject = stream;
+      if (stream) void video.play().catch(() => {}); // Always muted: audio uses one separate element.
     }
-  }, [participant.stream]);
+    const audio = audioRef.current;
+    const playAudio = () => {
+      if (audio && !isLocal && stream?.getAudioTracks().length)
+        void audio.play().catch(() => { if (!disposed) callbacks.current.onSoundBlocked(); });
+    };
+    if (audio && !isLocal) {
+      callbacks.current.registerAudio(userId, audio);
+      audio.srcObject = stream;
+      playAudio();
+      stream?.addEventListener("addtrack", playAudio);
+    }
+    return () => {
+      disposed = true;
+      stream?.removeEventListener("addtrack", playAudio);
+      if (video) { video.pause(); video.srcObject = null; }
+      if (audio) { audio.pause(); audio.srcObject = null; }
+      if (!isLocal) callbacks.current.registerAudio(userId, null);
+    };
+  }, [stream, isLocal, userId]);
 
-  const hasVideo = participant.stream && participant.stream.getVideoTracks().some(t => t.enabled && t.readyState === "live");
+  useEffect(() => {
+    if (!stream) return;
+    const update = () => updateTrackState(value => value + 1);
+    const tracks = stream.getTracks();
+    tracks.forEach(track => {
+      track.addEventListener("mute", update);
+      track.addEventListener("unmute", update);
+      track.addEventListener("ended", update);
+    });
+    stream.addEventListener("addtrack", update);
+    stream.addEventListener("removetrack", update);
+    return () => {
+      tracks.forEach(track => {
+        track.removeEventListener("mute", update);
+        track.removeEventListener("unmute", update);
+        track.removeEventListener("ended", update);
+      });
+      stream.removeEventListener("addtrack", update);
+      stream.removeEventListener("removetrack", update);
+    };
+  }, [stream]);
 
+  const hasVideo = videoEnabled !== false && !!stream?.getVideoTracks().some(track => track.enabled && !track.muted && track.readyState === "live");
   return (
-    <div
-      className={cn(
-        "relative rounded-xl overflow-hidden bg-zinc-800 flex items-center justify-center cursor-pointer group",
-        large ? "flex-1 min-h-[300px]" : small ? "w-32 h-24 shrink-0" : "aspect-video"
-      )}
-      onClick={onClick}
-    >
-      {hasVideo ? (
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted={participant.isLocal}
-          className="w-full h-full object-cover"
-        />
-      ) : (
-        <div className="flex flex-col items-center gap-2">
-          <Avatar className={cn(large ? "w-20 h-20" : "w-10 h-10")}>
-            <AvatarImage src={participant.avatar ?? undefined} />
-            <AvatarFallback className={cn("font-bold", large ? "text-2xl" : "text-sm")}>
-              {getInitials(participant.name)}
-            </AvatarFallback>
-          </Avatar>
-          {!small && <span className="text-white text-sm">{participant.name}</span>}
-        </div>
-      )}
-      {/* Name overlay */}
-      <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between">
-        <span className="text-white text-xs bg-black/50 rounded px-1.5 py-0.5 truncate max-w-[80%]">
-          {participant.isLocal ? `${participant.name} (You)` : participant.name}
-        </span>
+    <article className="relative aspect-[4/3] overflow-hidden rounded-2xl border border-white/10 bg-zinc-900" data-testid={isLocal ? "group-call-tile-local" : `group-call-tile-${userId}`} data-peer-status={participant.status}>
+      {/* Media nodes never depend on hasVideo. Audio-only calls and newly
+          arriving tracks must not lose srcObject through conditional remounts. */}
+      <video ref={videoRef} autoPlay playsInline muted className={cn("absolute inset-0 h-full w-full object-cover", !hasVideo && "invisible", isLocal && participant.status !== "Sharing screen" && "-scale-x-100")} data-testid={isLocal ? "group-call-local-video" : `group-call-video-${userId}`} />
+      {!isLocal && <audio ref={audioRef} autoPlay playsInline className="hidden" data-testid={`group-call-audio-${userId}`} />}
+      {!hasVideo && <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4"><Avatar className="h-16 w-16 sm:h-20 sm:w-20"><AvatarImage src={participant.avatar ?? undefined} /><AvatarFallback className="bg-zinc-700 text-white text-xl sm:text-2xl">{initials(participant.name)}</AvatarFallback></Avatar><span className="max-w-full truncate text-sm sm:text-base font-medium">{isLocal ? "You" : participant.name}</span></div>}
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-3 pb-3 pt-8">
+        <div className="flex items-center justify-between gap-2"><span className="truncate text-xs sm:text-sm font-medium">{isLocal ? `${participant.name} (You)` : participant.name}</span>{isLocal && audioEnabled === false && <MicOff className="h-4 w-4 shrink-0 text-red-300" aria-label="Microphone muted" />}</div>
+        <p className={cn("mt-1 text-xs", participant.needsRetry ? "text-amber-200" : "text-zinc-300")} aria-live="polite">{participant.status}</p>
+        {participant.needsRetry && <button onClick={onRetry} className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-white/15 px-2 py-1 text-xs hover:bg-white/25" data-testid={`group-call-retry-${userId}`}><RefreshCw className="h-3 w-3" />Leave and rejoin</button>}
       </div>
-      {/* Hover overlay */}
-      {onClick && (
-        <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-          <Maximize2 className="w-6 h-6 text-white" />
-        </div>
-      )}
-    </div>
+    </article>
   );
 }
 
-// ─── Control Button ───────────────────────────────────────────────────────────
-
-function ControlButton({
-  active,
-  activeIcon,
-  inactiveIcon,
-  activeLabel,
-  inactiveLabel,
-  onClick,
-  variant = "default",
-}: {
-  active: boolean;
-  activeIcon: React.ReactNode;
-  inactiveIcon: React.ReactNode;
-  activeLabel: string;
-  inactiveLabel: string;
+function ControlButton({ label, children, active = true, danger = false, disabled = false, onClick, testId }: {
+  label: string;
+  children: ReactNode;
+  active?: boolean;
+  danger?: boolean;
+  disabled?: boolean;
   onClick: () => void;
-  variant?: "default" | "secondary";
+  testId: string;
 }) {
-  return (
-    <button className="flex flex-col items-center gap-1 group" onClick={onClick}>
-      <div className={cn(
-        "w-12 h-12 rounded-full flex items-center justify-center transition-colors",
-        active
-          ? variant === "secondary" ? "bg-zinc-700 hover:bg-zinc-600" : "bg-zinc-700 hover:bg-zinc-600"
-          : "bg-red-600/20 hover:bg-red-600/30"
-      )}>
-        <span className={cn(active ? "text-white" : "text-red-400")}>
-          {active ? activeIcon : inactiveIcon}
-        </span>
-      </div>
-      <span className="text-xs text-zinc-400">{active ? activeLabel : inactiveLabel}</span>
-    </button>
-  );
+  return <button type="button" onClick={onClick} disabled={disabled} aria-label={label} title={label} data-testid={testId} className="flex flex-col items-center gap-1.5 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white rounded-lg">
+    <span className={cn("flex h-12 w-12 items-center justify-center rounded-full transition-colors", danger ? "bg-red-600 text-white hover:bg-red-700" : active ? "bg-zinc-700 text-white hover:bg-zinc-600" : "bg-red-500/20 text-red-300 hover:bg-red-500/30")}>{children}</span>
+    <span className="text-[11px] sm:text-xs text-zinc-300">{label}</span>
+  </button>;
 }

@@ -1,5 +1,7 @@
 import { orgPagePosts, OrgPagePost, InsertOrgPagePost, commentReactions } from "./../drizzle/schema";
 import { LIVE_STREAM_DURATION_MS, liveStreamDeadline } from "../shared/liveStream";
+import { TRPCError } from "@trpc/server";
+import { GROUP_CALL_MAX_PARTICIPANTS, GROUP_CALL_STALE_MS, GROUP_CALL_SIGNAL_TYPES, validGroupCallSignalPayload, type GroupCallSignalType } from "../shared/groupCall";
 import { countEffectiveReactions, mergePostReactors, type DurablePostReactor } from "./reactionConsistency";
 import { extractYouTubeVideoId, getYouTubeThumbnailUrl, isYouTubeUrl } from "./linkPreview";
 import { filterPeopleYouMayKnowCandidates } from "./peopleYouMayKnowAccess";
@@ -3036,6 +3038,121 @@ export async function getGroupMessages(groupId: number, limit = 50, before?: num
 }
 
 // ─── Call Rooms ───────────────────────────────────────────────────────────────
+type CallRoomTransaction = Parameters<Parameters<ReturnType<typeof drizzle>["transaction"]>[0]>[0];
+export type CallParticipantProfile = Pick<User, "id" | "name" | "avatar">;
+export type ActiveCallParticipant = CallParticipant & { user: CallParticipantProfile };
+
+async function requireCallRoomEligibility(tx: CallRoomTransaction, room: CallRoom, userId: number): Promise<void> {
+  if (room.groupId !== null) {
+    // Lock membership against concurrent removal for the duration of this operation.
+    const [member] = await tx.select({ id: groupMembers.id }).from(groupMembers)
+      .where(and(eq(groupMembers.groupId, room.groupId), eq(groupMembers.userId, userId))).limit(1).for("share");
+    if (!member) throw new TRPCError({ code: "FORBIDDEN", message: "Not a member of this group." });
+  } else if (room.hostId !== userId) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Only the host may access this call room." });
+  }
+}
+
+async function clearCallSignalsForUsers(tx: CallRoomTransaction, roomId: number, userIds: number[]): Promise<void> {
+  if (!userIds.length) return;
+  await tx.delete(callSignals).where(and(eq(callSignals.roomId, roomId), or(
+    inArray(callSignals.fromUserId, userIds), inArray(callSignals.toUserId, userIds),
+  )));
+}
+
+/** Called only with the room row locked. joinedAt deliberately doubles as last heartbeat. */
+async function expireCallRoom(tx: CallRoomTransaction, room: CallRoom, now: Date): Promise<CallParticipant[]> {
+  const rows = await tx.select().from(callParticipants)
+    .where(and(eq(callParticipants.roomId, room.id), isNull(callParticipants.leftAt)))
+    .orderBy(desc(callParticipants.joinedAt), asc(callParticipants.id));
+  let eligibleIds: Set<number> | undefined;
+  if (room.groupId !== null && rows.length) {
+    const members = await tx.select({ userId: groupMembers.userId }).from(groupMembers)
+      .where(eq(groupMembers.groupId, room.groupId));
+    eligibleIds = new Set(members.map(member => member.userId));
+  }
+  const seen = new Set<number>();
+  const active: CallParticipant[] = [];
+  const retiredIds: number[] = [];
+  const retiredUsers = new Set<number>();
+  for (const row of rows) {
+    if (room.status === "ended" || now.getTime() - row.joinedAt.getTime() >= GROUP_CALL_STALE_MS
+      || (eligibleIds ? !eligibleIds.has(row.userId) : row.userId !== room.hostId)) {
+      retiredIds.push(row.id);
+      retiredUsers.add(row.userId);
+    } else if (seen.has(row.userId)) {
+      // Legacy duplicates are closed, not counted as extra people.
+      retiredIds.push(row.id);
+    } else if (active.length >= GROUP_CALL_MAX_PARTICIPANTS) {
+      // Pre-repair rooms may already be over capacity; keep the freshest four.
+      retiredIds.push(row.id);
+      retiredUsers.add(row.userId);
+    } else {
+      seen.add(row.userId);
+      active.push(row);
+    }
+  }
+  if (retiredIds.length) await tx.update(callParticipants).set({ leftAt: now }).where(inArray(callParticipants.id, retiredIds));
+  await clearCallSignalsForUsers(tx, room.id, Array.from(retiredUsers).filter(userId => !seen.has(userId)));
+  if (room.status !== "ended" && active.length === 0
+    && (room.status === "active" || now.getTime() - room.startedAt.getTime() >= GROUP_CALL_STALE_MS)) {
+    await tx.update(callRooms).set({ status: "ended", endedAt: now }).where(eq(callRooms.id, room.id));
+    room.status = "ended";
+    room.endedAt = now;
+    await tx.delete(callSignals).where(eq(callSignals.roomId, room.id));
+  }
+  return active;
+}
+
+async function withLockedCallRoom<T>(roomId: number, userId: number | undefined,
+  action: (tx: CallRoomTransaction, room: CallRoom, active: CallParticipant[], now: Date) => Promise<T>,
+  authorizeBeforeCleanup?: (tx: CallRoomTransaction, room: CallRoom) => Promise<void>,
+): Promise<T> {
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available." });
+  const result = await db.transaction(async tx => {
+    const [room] = await tx.select().from(callRooms).where(eq(callRooms.id, roomId)).limit(1).for("update");
+    if (!room) return { error: new TRPCError({ code: "NOT_FOUND", message: "Call room not found." }) };
+    if (userId !== undefined) await requireCallRoomEligibility(tx, room, userId);
+    if (authorizeBeforeCleanup) await authorizeBeforeCleanup(tx, room);
+    const now = new Date();
+    const active = await expireCallRoom(tx, room, now);
+    // Business rejections still commit expiry/duplicate cleanup. SQL failures roll back.
+    try {
+      return { value: await action(tx, room, active, now) };
+    } catch (error) {
+      if (error instanceof TRPCError) return { error };
+      throw error;
+    }
+  });
+  if ("error" in result) throw result.error;
+  return result.value;
+}
+
+function requireActiveCallParticipant(room: CallRoom, active: CallParticipant[], userId: number): void {
+  if (room.status === "ended") throw new TRPCError({ code: "BAD_REQUEST", message: "This call has ended." });
+  if (!active.some(participant => participant.userId === userId)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Join this call before signaling." });
+  }
+}
+
+async function touchCallParticipant(tx: CallRoomTransaction, active: CallParticipant[], userId: number, now: Date): Promise<void> {
+  const participant = active.find(row => row.userId === userId);
+  if (participant) {
+    await tx.update(callParticipants).set({ joinedAt: now }).where(eq(callParticipants.id, participant.id));
+    participant.joinedAt = now;
+  }
+}
+
+async function requireUnblockedCallPeers(tx: CallRoomTransaction, userId: number, peerIds: number[]): Promise<void> {
+  const peers = peerIds.filter(id => id !== userId);
+  if (!peers.length) return;
+  const [blocked] = await tx.select({ id: blocks.id }).from(blocks).where(or(
+    and(eq(blocks.blockerId, userId), inArray(blocks.blockedId, peers)),
+    and(eq(blocks.blockedId, userId), inArray(blocks.blockerId, peers)),
+  )).limit(1);
+  if (blocked) throw new TRPCError({ code: "FORBIDDEN", message: "A blocked member is participating in this call." });
+}
 
 export async function createCallRoom(data: {
   groupId?: number;
@@ -3043,83 +3160,177 @@ export async function createCallRoom(data: {
   type: "audio" | "video";
 }): Promise<number> {
   const db = await getDb();
-  if (!db) throw new Error("Database not available");
-  const result = await db.insert(callRooms).values({
-    groupId: data.groupId ?? null,
-    hostId: data.hostId,
-    type: data.type,
-    status: "waiting",
-  }).returning({ id: callRooms.id });
-  return result[0].id;
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available." });
+  return db.transaction(async tx => {
+    if (data.groupId !== undefined) {
+      // Serializes concurrent creates even when no call room exists yet.
+      const [group] = await tx.select({ id: groupConversations.id }).from(groupConversations)
+        .where(eq(groupConversations.id, data.groupId)).limit(1).for("update");
+      if (!group) throw new TRPCError({ code: "NOT_FOUND", message: "Group not found." });
+      await requireCallRoomEligibility(tx, { groupId: data.groupId } as CallRoom, data.hostId);
+      const rooms = await tx.select().from(callRooms)
+        .where(and(eq(callRooms.groupId, data.groupId), ne(callRooms.status, "ended")))
+        .orderBy(desc(callRooms.status), asc(callRooms.startedAt)).for("update");
+      for (const room of rooms) {
+        const active = await expireCallRoom(tx, room, new Date());
+        if (room.status !== "ended") {
+          await requireUnblockedCallPeers(tx, data.hostId, active.map(row => row.userId));
+          return room.id;
+        }
+      }
+    }
+    const [room] = await tx.insert(callRooms).values({
+      groupId: data.groupId ?? null, hostId: data.hostId, type: data.type, status: "waiting",
+    }).returning({ id: callRooms.id });
+    // No ghost participant: callers explicitly join after acquiring media.
+    return room.id;
+  });
 }
 
-export async function getCallRoom(roomId: number): Promise<CallRoom | undefined> {
+export async function getCallRoom(roomId: number, viewerId?: number): Promise<CallRoom | undefined> {
+  try {
+    return await withLockedCallRoom(roomId, viewerId, async (tx, room, active, now) => {
+      if (viewerId !== undefined) await touchCallParticipant(tx, active, viewerId, now);
+      return room;
+    });
+  } catch (error) {
+    if (error instanceof TRPCError && error.code === "NOT_FOUND") return undefined;
+    throw error;
+  }
+}
+
+/** Waiting or active rooms are joinable; expired/ended rooms are never returned. */
+export async function getActiveCallRoomForGroup(groupId: number, userId: number): Promise<CallRoom | null> {
   const db = await getDb();
-  if (!db) return undefined;
-  const result = await db.select().from(callRooms).where(eq(callRooms.id, roomId)).limit(1);
-  return result[0];
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available." });
+  return db.transaction(async tx => {
+    await requireCallRoomEligibility(tx, { groupId } as CallRoom, userId);
+    const rooms = await tx.select().from(callRooms)
+      .where(and(eq(callRooms.groupId, groupId), ne(callRooms.status, "ended")))
+      .orderBy(desc(callRooms.status), asc(callRooms.startedAt)).for("update");
+    for (const room of rooms) {
+      await expireCallRoom(tx, room, new Date());
+      if (room.status !== "ended") return room;
+    }
+    return null;
+  });
 }
 
 export async function updateCallRoomStatus(roomId: number, status: "waiting" | "active" | "ended"): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  const update: Partial<CallRoom> = { status };
-  if (status === "ended") update.endedAt = new Date();
-  await db.update(callRooms).set(update).where(eq(callRooms.id, roomId));
+  await withLockedCallRoom(roomId, undefined, async (tx, room, active, now) => {
+    if (room.status === "ended" || status === "waiting" || (status === "active" && !active.length)) return;
+    await tx.update(callRooms).set(status === "ended" ? { status, endedAt: now } : { status })
+      .where(eq(callRooms.id, roomId));
+    if (status === "ended") {
+      await tx.update(callParticipants).set({ leftAt: now })
+        .where(and(eq(callParticipants.roomId, roomId), isNull(callParticipants.leftAt)));
+      await tx.delete(callSignals).where(eq(callSignals.roomId, roomId));
+    }
+  });
 }
 
 export async function joinCallRoom(roomId: number, userId: number): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  await db.insert(callParticipants).values({ roomId, userId }).onConflictDoNothing();
-  await updateCallRoomStatus(roomId, "active");
+  await withLockedCallRoom(roomId, userId, async (tx, room, active, now) => {
+    if (room.status === "ended") throw new TRPCError({ code: "BAD_REQUEST", message: "This call has ended." });
+    await requireUnblockedCallPeers(tx, userId, active.map(row => row.userId));
+    if (active.some(row => row.userId === userId)) {
+      await touchCallParticipant(tx, active, userId, now);
+      return;
+    }
+    if (active.length >= GROUP_CALL_MAX_PARTICIPANTS) {
+      throw new TRPCError({ code: "CONFLICT", message: "This call is full (maximum 4 participants)." });
+    }
+    const previous = await tx.select({ id: callParticipants.id }).from(callParticipants)
+      .where(and(eq(callParticipants.roomId, roomId), eq(callParticipants.userId, userId)))
+      .orderBy(desc(callParticipants.id));
+    // Delete old incoming and outgoing descriptions/ICE before a genuinely new session.
+    await clearCallSignalsForUsers(tx, roomId, [userId]);
+    if (previous.length) {
+      await tx.update(callParticipants).set({ leftAt: now })
+        .where(and(eq(callParticipants.roomId, roomId), eq(callParticipants.userId, userId)));
+      await tx.update(callParticipants).set({ leftAt: null, joinedAt: now }).where(eq(callParticipants.id, previous[0].id));
+    } else {
+      await tx.insert(callParticipants).values({ roomId, userId, joinedAt: now, leftAt: null });
+    }
+    await tx.update(callRooms).set({ status: "active" }).where(eq(callRooms.id, roomId));
+  });
 }
 
 export async function leaveCallRoom(roomId: number, userId: number): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  await db.update(callParticipants).set({ leftAt: new Date() }).where(and(eq(callParticipants.roomId, roomId), eq(callParticipants.userId, userId)));
-  // Check if all participants have left
-  const active = await db.select().from(callParticipants).where(and(eq(callParticipants.roomId, roomId), isNull(callParticipants.leftAt)));
-  if (active.length === 0) await updateCallRoomStatus(roomId, "ended");
+  await withLockedCallRoom(roomId, undefined, async (tx, room, active, now) => {
+    if (!active.some(row => row.userId === userId)) return;
+    await tx.update(callParticipants).set({ leftAt: now })
+      .where(and(eq(callParticipants.roomId, roomId), eq(callParticipants.userId, userId), isNull(callParticipants.leftAt)));
+    await clearCallSignalsForUsers(tx, roomId, [userId]);
+    if (active.every(row => row.userId === userId)) {
+      await tx.update(callRooms).set({ status: "ended", endedAt: now }).where(eq(callRooms.id, roomId));
+      await tx.delete(callSignals).where(eq(callSignals.roomId, roomId));
+    }
+  }, async (tx, room) => {
+    // Removed members may clean up only their own historical participation.
+    // Authorize before expiry so an outsider's Leave cannot mutate the room.
+    const [own] = await tx.select({ id: callParticipants.id }).from(callParticipants)
+      .where(and(eq(callParticipants.roomId, roomId), eq(callParticipants.userId, userId))).limit(1);
+    if (!own) await requireCallRoomEligibility(tx, room, userId);
+  });
 }
 
-export async function getActiveCallParticipants(roomId: number): Promise<(CallParticipant & { user: User })[]> {
-  const db = await getDb();
-  if (!db) return [];
-  const rows = await db.select().from(callParticipants).where(and(eq(callParticipants.roomId, roomId), isNull(callParticipants.leftAt)));
-  const userIds = rows.map(r => r.userId);
-  if (userIds.length === 0) return [];
-  const userRows = await db.select().from(users).where(inArray(users.id, userIds));
-  const userMap = new Map(userRows.map(u => [u.id, u]));
-  return rows.map(p => ({ ...p, user: userMap.get(p.userId)! })).filter(p => p.user);
+export async function getActiveCallParticipants(roomId: number, viewerId?: number): Promise<ActiveCallParticipant[]> {
+  return withLockedCallRoom(roomId, viewerId, async (tx, _room, active) => {
+    if (!active.length) return [];
+    const profiles = await tx.select({ id: users.id, name: users.name, avatar: users.avatar }).from(users)
+      .where(inArray(users.id, active.map(row => row.userId)));
+    const byId = new Map(profiles.map(profile => [profile.id, profile]));
+    return active.flatMap(row => {
+      const user = byId.get(row.userId);
+      return user ? [{ ...row, user }] : [];
+    });
+  });
 }
 
 // ─── WebRTC Signals ───────────────────────────────────────────────────────────
-
 export async function sendCallSignal(data: {
   roomId: number;
   fromUserId: number;
   toUserId: number;
-  type: string;
+  type: GroupCallSignalType;
   payload: string;
 }): Promise<void> {
-  const db = await getDb();
-  if (!db) return;
-  await db.insert(callSignals).values({ ...data, consumed: false });
+  if (![data.roomId, data.fromUserId, data.toUserId].every(id => Number.isInteger(id) && id > 0)
+    || !GROUP_CALL_SIGNAL_TYPES.includes(data.type) || !validGroupCallSignalPayload(data.type, data.payload)) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid call signal." });
+  }
+  if (data.fromUserId === data.toUserId) throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot signal yourself." });
+  await withLockedCallRoom(data.roomId, data.fromUserId, async (tx, room, active, now) => {
+    requireActiveCallParticipant(room, active, data.fromUserId);
+    await requireCallRoomEligibility(tx, room, data.toUserId);
+    requireActiveCallParticipant(room, active, data.toUserId);
+    await requireUnblockedCallPeers(tx, data.fromUserId, [data.toUserId]);
+    await touchCallParticipant(tx, active, data.fromUserId, now);
+    await tx.insert(callSignals).values({ ...data, consumed: false, createdAt: now });
+  });
 }
 
 export async function getUnconsumedSignals(roomId: number, toUserId: number): Promise<CallSignal[]> {
-  const db = await getDb();
-  if (!db) return [];
-  const rows = await db.select().from(callSignals).where(and(eq(callSignals.roomId, roomId), eq(callSignals.toUserId, toUserId), eq(callSignals.consumed, false))).orderBy(callSignals.createdAt);
-  if (rows.length > 0) {
-    const ids = rows.map(r => r.id);
-    await db.update(callSignals).set({ consumed: true }).where(inArray(callSignals.id, ids));
-  }
-  return rows;
+  return withLockedCallRoom(roomId, toUserId, async (tx, room, active, now) => {
+    requireActiveCallParticipant(room, active, toUserId);
+    await touchCallParticipant(tx, active, toUserId, now);
+    const rows = await tx.select().from(callSignals)
+      .where(and(eq(callSignals.roomId, roomId), eq(callSignals.toUserId, toUserId), eq(callSignals.consumed, false)))
+      .orderBy(asc(callSignals.createdAt), asc(callSignals.id));
+    if (rows.length) await tx.update(callSignals).set({ consumed: true }).where(inArray(callSignals.id, rows.map(row => row.id)));
+    const peerIds = active.filter(row => row.userId !== toUserId).map(row => row.userId);
+    if (!peerIds.length) return [];
+    const blocked = await tx.select({ blockerId: blocks.blockerId, blockedId: blocks.blockedId }).from(blocks).where(or(
+      and(eq(blocks.blockerId, toUserId), inArray(blocks.blockedId, peerIds)),
+      and(eq(blocks.blockedId, toUserId), inArray(blocks.blockerId, peerIds)),
+    ));
+    const blockedIds = new Set(blocked.map(row => row.blockerId === toUserId ? row.blockedId : row.blockerId));
+    return rows.filter(row => peerIds.includes(row.fromUserId) && !blockedIds.has(row.fromUserId)
+      && GROUP_CALL_SIGNAL_TYPES.includes(row.type as GroupCallSignalType)
+      && validGroupCallSignalPayload(row.type as GroupCallSignalType, row.payload));
+  });
 }
-
 // ─── Profile Photos ───────────────────────────────────────────────────────────
 
 export async function getProfilePhotos(userId: number): Promise<ProfilePhoto[]> {

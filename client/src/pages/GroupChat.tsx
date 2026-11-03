@@ -7,7 +7,9 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Send, ArrowLeft, Users, Plus, Video, Phone, UserPlus, LogOut, X, Pin, BellOff, Bell, Camera, Search, MessageCircle } from "lucide-react";
+import { Send, ArrowLeft, Users, Plus, Video, Phone, UserPlus, LogOut, X, Pin, BellOff, Bell, Camera, Search, MessageCircle, MoreHorizontal } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import ChatMessageContent from "@/components/ChatMessageContent";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useLocation } from "wouter";
@@ -225,6 +227,7 @@ export function GroupThread({ groupId, onBack }: { groupId: number; onBack: () =
     onSuccess: (data) => { navigate(`/calls/group/${data.roomId}`); },
     onError: (e) => toast.error(e.message),
   });
+  const { data: activeCall } = trpc.calls.activeForGroup.useQuery({ groupId }, { refetchInterval: 5000 });
 
   // Pinning
   const [showPinned, setShowPinned] = useState(false);
@@ -329,35 +332,26 @@ export function GroupThread({ groupId, onBack }: { groupId: number; onBack: () =
             <p className="text-xs text-muted-foreground">{members.length} members</p>
           </div>
           <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
-            {pinnedMsgs.length > 0 && (
-              <Button variant="ghost" size="icon" title={`${pinnedMsgs.length} pinned`} onClick={() => setShowPinned(v => !v)} className="relative">
-                <Pin className="w-4 h-4" />
-                <span className="absolute -top-0.5 -right-0.5 bg-primary text-primary-foreground text-[9px] rounded-full w-3.5 h-3.5 flex items-center justify-center font-bold">{pinnedMsgs.length}</span>
-              </Button>
-            )}
-            <Button variant="ghost" size="icon" title={isMuted ? 'Unmute' : 'Mute notifications'} onClick={() => muteMutation.mutate({ groupId, mutedUntil: isMuted ? null : Date.now() + 8 * 3600000 })}>
-              {isMuted ? <BellOff className="w-4 h-4 text-muted-foreground" /> : <Bell className="w-4 h-4" />}
-            </Button>
-            <Button variant="ghost" size="icon" title="Audio call" className="hidden sm:inline-flex" onClick={() => startCallMutation.mutate({ groupId, type: "audio" })}>
+            <Button variant="ghost" size="icon" title="Group voice call" aria-label="Group voice call" disabled={startCallMutation.isPending} onClick={() => activeCall ? navigate(`/calls/group/${activeCall.id}`) : startCallMutation.mutate({ groupId, type: "audio" })}>
               <Phone className="w-4 h-4" />
             </Button>
-            <Button variant="ghost" size="icon" title="Video call" className="hidden sm:inline-flex" onClick={() => startCallMutation.mutate({ groupId, type: "video" })}>
+            <Button variant="ghost" size="icon" title="Group video call" aria-label="Group video call" disabled={startCallMutation.isPending} onClick={() => activeCall ? navigate(`/calls/group/${activeCall.id}`) : startCallMutation.mutate({ groupId, type: "video" })}>
               <Video className="w-4 h-4" />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              title="Open in Messenger"
-              className="hidden md:inline-flex"
-              onClick={() => navigate(`/messages?tab=groups&group=${groupId}`)}
-            >
-              <MessageCircle className="w-4 h-4" />
-            </Button>
-            <Button variant="ghost" size="icon" title="Members" onClick={() => setShowMembers(v => !v)}>
-              <Users className="w-4 h-4" />
-            </Button>
+            <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Group chat options"><MoreHorizontal className="h-5 w-5" /></Button></DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="z-[90]">
+                <DropdownMenuItem onSelect={() => setShowMembers(v => !v)}><Users className="mr-2 h-4 w-4" />Members</DropdownMenuItem>
+                {pinnedMsgs.length > 0 && <DropdownMenuItem onSelect={() => setShowPinned(v => !v)}><Pin className="mr-2 h-4 w-4" />Pinned messages ({pinnedMsgs.length})</DropdownMenuItem>}
+                <DropdownMenuItem onSelect={() => muteMutation.mutate({ groupId, mutedUntil: isMuted ? null : Date.now() + 8 * 3600000 })}>{isMuted ? <BellOff className="mr-2 h-4 w-4" /> : <Bell className="mr-2 h-4 w-4" />}{isMuted ? "Unmute notifications" : "Mute notifications"}</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => navigate(`/messages?tab=groups&group=${groupId}`)}><MessageCircle className="mr-2 h-4 w-4" />Open in Messenger</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
+        {activeCall && <div className="flex items-center justify-between gap-2 border-b px-3 py-2 text-sm" style={{ background: "var(--its-surface-alt)", color: "var(--its-text-primary)" }}>
+          <span className="min-w-0 truncate">{activeCall.type === "video" ? "Video" : "Voice"} call open · up to 4 people</span>
+          <Button size="sm" variant="outline" onClick={() => navigate(`/calls/group/${activeCall.id}`)}>Join call</Button>
+        </div>}
         {/* Pinned messages panel */}
         {showPinned && pinnedMsgs.length > 0 && (
           <div className="border-b bg-muted/40 px-4 py-2 space-y-1 max-h-40 overflow-y-auto">
@@ -404,7 +398,7 @@ export function GroupThread({ groupId, onBack }: { groupId: number; onBack: () =
                       "rounded-2xl px-3 py-2 text-sm break-words",
                       isMe ? "bg-primary text-primary-foreground rounded-tr-sm" : "bg-muted rounded-tl-sm"
                     )}>
-                      {msg.content}
+                      <ChatMessageContent text={msg.content} />
                     </div>
                     <span className="text-xs text-muted-foreground px-1">{formatTime(msg.createdAt)}</span>
                     {Object.keys(msgReactions).length > 0 && (

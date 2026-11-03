@@ -6,7 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  Paperclip, Send, ArrowLeft, MessageCircle, Download,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import ChatMessageContent from "@/components/ChatMessageContent";
+import ChatAttachment from "@/components/ChatAttachment";
+import {
+  Paperclip, Send, ArrowLeft, MessageCircle, MoreHorizontal, Plus, Maximize2, Minimize2,
   Phone, Video, Camera, CheckCheck, Check, BadgeCheck, Search, Smile, Image as ImageIcon, X, ChevronUp, ChevronDown, Trash2,
   Mic, MicOff, Share2, Pin, PinOff, Gift, Users, Bell, BellOff
 } from "lucide-react";
@@ -64,22 +70,6 @@ function isSameDay(a: Date | string, b: Date | string) {
     da.getDate() === db.getDate();
 }
 
-function highlightText(text: string, query: string) {
-  if (!query.trim()) return <>{text}</>;
-  const parts = text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi"));
-  return (
-    <>
-      {parts.map((part, i) =>
-        part.toLowerCase() === query.toLowerCase() ? (
-          <mark key={i} className="bg-yellow-300 text-black rounded-sm px-0.5">{part}</mark>
-        ) : (
-          <span key={i}>{part}</span>
-        )
-      )}
-    </>
-  );
-}
-
 export default function Messages() {
   const { user } = useAuth();
   const [, navigate] = useLocation();
@@ -90,6 +80,12 @@ export default function Messages() {
   const [text, setText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
+  const [mobileFocusMode, setMobileFocusMode] = useState(true);
+
+  // A new DM starts focused on mobile; desktop navigation is never changed.
+  useEffect(() => {
+    setMobileFocusMode(true);
+  }, [activeConvId]);
 
   // ── Message search (in-conversation) ─────────────────────────────────────
   const [msgSearchQuery, setMsgSearchQuery] = useState("");
@@ -613,7 +609,7 @@ export default function Messages() {
   }
 
   async function handleSend() {
-    if (!text.trim() || !activeConvId) return;
+    if (!text.trim() || !activeConvId || sendMutation.isPending || uploading) return;
     sendMutation.mutate({ conversationId: activeConvId, text: text.trim() });
     if (inputRef.current) {
       inputRef.current.style.height = "auto";
@@ -695,27 +691,31 @@ export default function Messages() {
 
   return (
     <>
-      {outgoingCall && (
-        <CallModal
-          peerId={outgoingCall.peerId}
-          peerName={outgoingCall.peerName}
-          peerAvatar={outgoingCall.peerAvatar}
-          isVideo={outgoingCall.isVideo}
-          socketRef={socketRef}
-          onClose={() => setOutgoingCall(null)}
-        />
-      )}
-      {incomingCall && (
-        <CallModal
-          peerId={incomingCall.peerId}
-          peerName={incomingCall.peerName}
-          peerAvatar={incomingCall.peerAvatar}
-          isVideo={incomingCall.isVideo}
-          incomingOffer={incomingCall.offer}
-          incomingCandidates={incomingCall.incomingCandidates}
-          socketRef={socketRef}
-          onClose={() => setIncomingCall(null)}
-        />
+      {(outgoingCall || incomingCall) && (
+        <div className="relative z-[110]">
+          {outgoingCall && (
+            <CallModal
+              peerId={outgoingCall.peerId}
+              peerName={outgoingCall.peerName}
+              peerAvatar={outgoingCall.peerAvatar}
+              isVideo={outgoingCall.isVideo}
+              socketRef={socketRef}
+              onClose={() => setOutgoingCall(null)}
+            />
+          )}
+          {incomingCall && (
+            <CallModal
+              peerId={incomingCall.peerId}
+              peerName={incomingCall.peerName}
+              peerAvatar={incomingCall.peerAvatar}
+              isVideo={incomingCall.isVideo}
+              incomingOffer={incomingCall.offer}
+              incomingCandidates={incomingCall.incomingCandidates}
+              socketRef={socketRef}
+              onClose={() => setIncomingCall(null)}
+            />
+          )}
+        </div>
       )}
 
       {/* ── Full-height chat layout ── */}
@@ -732,7 +732,7 @@ export default function Messages() {
           className={cn(
             "flex flex-col border-r min-h-0 overflow-hidden",
             "w-full md:w-[340px] md:min-w-[280px] md:max-w-[340px]",
-            activeConvId ? "hidden md:flex" : "flex"
+            activeConvId || (sidebarTab === "groups" && activeGroupId !== null) ? "hidden md:flex" : "flex"
           )}
           style={{ borderColor: "var(--its-border)", background: "var(--its-bg)" }}
         >
@@ -977,20 +977,24 @@ export default function Messages() {
         {/* ══ CHAT THREAD ══════════════════════════════════════════════════════ */}
         {/* Group thread panel */}
         {sidebarTab === "groups" && activeGroupId !== null && (
-          <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          <div data-testid="group-thread-panel" className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
             <GroupThread groupId={activeGroupId} onBack={() => setActiveGroupId(null)} />
           </div>
         )}
         {/* DM thread panel */}
         <div
+          data-testid="dm-thread"
           className={cn(
             "flex min-w-0 flex-col overflow-hidden",
             (!activeConvId || sidebarTab === "groups")
               ? "hidden md:flex md:flex-1"
-              : "fixed inset-x-0 bottom-0 top-16 z-40 h-[calc(100dvh-4rem)] bg-background md:static md:z-auto md:h-auto md:flex-1",
+              : cn(
+                  "fixed inset-x-0 bottom-0 bg-background md:static md:z-auto md:h-auto md:flex-1",
+                  mobileFocusMode ? "top-0 z-[80] h-[100dvh]" : "top-16 z-40 h-[calc(100dvh-4rem)]"
+                ),
             sidebarTab === "groups" ? "hidden" : ""
           )}
-          style={{ background: "var(--its-bg)" }}
+          style={{ background: "var(--its-surface)" }}
         >
           {!activeConvId ? (
             /* Empty state */
@@ -1017,12 +1021,17 @@ export default function Messages() {
             <>
               {/* ── Thread Header ── */}
               <div
-                className="sticky top-0 z-30 flex items-center gap-3 px-3 py-2.5 border-b shadow-sm flex-shrink-0"
-                style={{ borderColor: "var(--its-border)", background: "var(--its-bg)" }}
+                className="sticky top-0 z-30 flex items-center gap-1.5 sm:gap-3 px-2 sm:px-3 py-2.5 border-b shadow-sm flex-shrink-0"
+                style={{
+                  borderColor: "var(--its-border)",
+                  background: "var(--its-surface)",
+                  paddingTop: mobileFocusMode ? "calc(0.625rem + env(safe-area-inset-top, 0px))" : undefined,
+                }}
               >
                 {/* Back button (mobile) */}
                 <button
-                  className="md:hidden p-1.5 rounded-full hover:bg-muted/50 transition-colors"
+                  className="md:hidden p-2 rounded-full hover:bg-muted/50 transition-colors flex-shrink-0"
+                  aria-label="Back to conversations"
                   onClick={() => {
                     navigate("/messages");
                     setActiveConvId(null);
@@ -1035,7 +1044,7 @@ export default function Messages() {
 
                 {/* Avatar + name */}
                 <button
-                  className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                  className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0 text-left"
                   onClick={() => {
                     if ((activeConv?.otherUser as any)?.id) {
                       navigate(`/profile/${(activeConv?.otherUser as any).id}`);
@@ -1043,7 +1052,7 @@ export default function Messages() {
                   }}
                 >
                   <div className="relative flex-shrink-0">
-                    <Avatar className="w-10 h-10">
+                    <Avatar className="w-9 h-9 sm:w-10 sm:h-10">
                       <AvatarImage src={(activeConv?.otherUser as any)?.avatar ?? undefined} />
                       <AvatarFallback className="text-sm font-semibold">
                         {getInitials((activeConv?.otherUser as any)?.name ?? "?")}
@@ -1070,54 +1079,13 @@ export default function Messages() {
                 </button>
 
                 {/* Action buttons */}
-                <div className="flex gap-1 flex-shrink-0">
-                  {/* Mute toggle */}
+                <div className="flex gap-0.5 flex-shrink-0">
                   <Button
                     variant="ghost"
                     size="icon"
-                    className={cn("hidden sm:inline-flex rounded-full w-9 h-9", isDmMuted && "bg-muted/60")}
-                    title={isDmMuted ? "Unmute notifications" : "Mute notifications"}
-                    onClick={() => muteDmMutation.mutate({
-                      conversationId: activeConvId!,
-                      mutedUntil: isDmMuted ? null : Date.now() + 8 * 3600000,
-                    })}
-                  >
-                    {isDmMuted ? <BellOff className="w-4 h-4 text-muted-foreground" /> : <Bell className="w-4 h-4" />}
-                  </Button>
-                  {/* Pinned messages toggle */}
-                  {pinnedMessages.length > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className={cn("hidden sm:inline-flex rounded-full w-9 h-9 relative", showPinnedPanel && "bg-primary/10")}
-                      title="Pinned messages"
-                      onClick={() => setShowPinnedPanel((v) => !v)}
-                    >
-                      <Pin className="w-4 h-4" />
-                      <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-primary text-primary-foreground text-[9px] font-bold flex items-center justify-center">
-                        {pinnedMessages.length}
-                      </span>
-                    </Button>
-                  )}
-                  {/* Message search toggle */}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn("hidden sm:inline-flex rounded-full w-9 h-9", showMsgSearch && "bg-primary/10")}
-                    title="Search messages"
-                    onClick={() => {
-                      setShowMsgSearch((v) => !v);
-                      setMsgSearchQuery("");
-                      setTimeout(() => msgSearchRef.current?.focus(), 100);
-                    }}
-                  >
-                    <Search className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="rounded-full w-9 h-9"
+                    className="rounded-full w-10 h-10"
                     title="Voice call"
+                    aria-label="Voice call"
                     onClick={startVoiceCall}
                   >
                     <Phone className="w-4 h-4" />
@@ -1125,12 +1093,68 @@ export default function Messages() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="rounded-full w-9 h-9"
+                    className="rounded-full w-10 h-10"
                     title="Video call"
+                    aria-label="Video call"
                     onClick={startVideoCall}
                   >
                     <Video className="w-4 h-4" />
                   </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="rounded-full w-10 h-10"
+                        title="More chat options"
+                        aria-label="More chat options"
+                        data-testid="dm-more-menu"
+                      >
+                        <MoreHorizontal className="w-5 h-5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="z-[90] w-56">
+                      <DropdownMenuItem
+                        className="min-h-11"
+                        disabled={muteDmMutation.isPending}
+                        onSelect={() => muteDmMutation.mutate({
+                          conversationId: activeConvId!,
+                          mutedUntil: isDmMuted ? null : Date.now() + 8 * 3600000,
+                        })}
+                      >
+                        {isDmMuted ? <BellOff /> : <Bell />}
+                        {isDmMuted ? "Unmute notifications" : "Mute notifications"}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="min-h-11"
+                        onSelect={() => setShowPinnedPanel((v) => !v)}
+                        disabled={pinnedMessages.length === 0}
+                      >
+                        <Pin />
+                        Pinned messages ({pinnedMessages.length})
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="min-h-11"
+                        onSelect={() => {
+                          setShowMsgSearch((v) => !v);
+                          setMsgSearchQuery("");
+                          setTimeout(() => msgSearchRef.current?.focus(), 100);
+                        }}
+                      >
+                        <Search />
+                        {showMsgSearch ? "Close message search" : "Search messages"}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator className="md:hidden" />
+                      <DropdownMenuItem
+                        className="min-h-11 md:hidden"
+                        data-testid="dm-site-menu-toggle"
+                        onSelect={() => setMobileFocusMode((v) => !v)}
+                      >
+                        {mobileFocusMode ? <Minimize2 /> : <Maximize2 />}
+                        {mobileFocusMode ? "Show site menu" : "Hide site menu"}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
 
@@ -1144,9 +1168,10 @@ export default function Messages() {
                   <input
                     ref={msgSearchRef}
                     value={msgSearchQuery}
+                    aria-label="Search in conversation"
                     onChange={(e) => setMsgSearchQuery(e.target.value)}
                     placeholder="Search in conversation..."
-                    className="flex-1 bg-transparent border-0 outline-none text-sm"
+                    className="flex-1 min-w-0 bg-transparent border-0 outline-none text-base md:text-sm"
                     style={{ color: "var(--its-text-primary)" }}
                   />
                   {msgSearchTerm && (
@@ -1160,6 +1185,7 @@ export default function Messages() {
                         className="p-1 rounded hover:bg-muted/50"
                         onClick={() => setMsgSearchMatchIndex((i) => (i - 1 + totalMatches) % totalMatches)}
                         title="Previous match"
+                        aria-label="Previous match"
                       >
                         <ChevronUp className="w-4 h-4" style={{ color: "var(--its-text-muted)" }} />
                       </button>
@@ -1167,6 +1193,7 @@ export default function Messages() {
                         className="p-1 rounded hover:bg-muted/50"
                         onClick={() => setMsgSearchMatchIndex((i) => (i + 1) % totalMatches)}
                         title="Next match"
+                        aria-label="Next match"
                       >
                         <ChevronDown className="w-4 h-4" style={{ color: "var(--its-text-muted)" }} />
                       </button>
@@ -1176,6 +1203,7 @@ export default function Messages() {
                     <button
                       className="p-1 rounded hover:bg-muted/50"
                       onClick={() => { setMsgSearchQuery(""); }}
+                      aria-label="Clear message search"
                     >
                       <X className="w-4 h-4" style={{ color: "var(--its-text-muted)" }} />
                     </button>
@@ -1183,6 +1211,7 @@ export default function Messages() {
                   <button
                     className="p-1 rounded hover:bg-muted/50"
                     onClick={() => { setShowMsgSearch(false); setMsgSearchQuery(""); }}
+                    aria-label="Close message search"
                   >
                     <X className="w-4 h-4" style={{ color: "var(--its-text-muted)" }} />
                   </button>
@@ -1200,7 +1229,7 @@ export default function Messages() {
                       <Pin className="w-3 h-3" />
                       {pinnedMessages.length} Pinned Message{pinnedMessages.length > 1 ? "s" : ""}
                     </span>
-                    <button onClick={() => setShowPinnedPanel(false)} className="p-0.5 rounded hover:bg-muted/50">
+                    <button onClick={() => setShowPinnedPanel(false)} aria-label="Close pinned messages" className="p-0.5 rounded hover:bg-muted/50">
                       <X className="w-3.5 h-3.5" style={{ color: "var(--its-text-muted)" }} />
                     </button>
                   </div>
@@ -1208,9 +1237,14 @@ export default function Messages() {
                     <div key={pm.id} className="flex items-start gap-2 px-3 py-2 hover:bg-muted/30 transition-colors">
                       <Pin className="w-3 h-3 flex-shrink-0 mt-0.5 opacity-50" style={{ color: "var(--its-primary)" }} />
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs truncate" style={{ color: "var(--its-text-primary)" }}>
-                          {pm.text || (pm.fileType?.startsWith("image/") ? "📷 Image" : pm.fileType?.startsWith("audio/") ? "🎤 Voice message" : "📎 File")}
-                        </p>
+                        {pm.text && (
+                          <div className="text-xs break-words" style={{ color: "var(--its-text-primary)" }}>
+                            <ChatMessageContent text={pm.text} searchQuery={msgSearchQuery.trim()} />
+                          </div>
+                        )}
+                        {pm.fileUrl && (
+                          <ChatAttachment url={pm.fileUrl} type={pm.fileType} name={pm.fileName} compact />
+                        )}
                         <p className="text-[10px] mt-0.5" style={{ color: "var(--its-text-muted)" }}>
                           {formatTime(pm.createdAt)}
                         </p>
@@ -1322,14 +1356,14 @@ export default function Messages() {
 
                             <div
                               className={cn(
-                                "flex flex-col max-w-[72%] sm:max-w-[60%]",
+                                "flex min-w-0 flex-col max-w-[82%] sm:max-w-[60%]",
                                 isMine ? "items-end" : "items-start"
                               )}
                             >
                               {/* Bubble */}
                               <div
                                 className={cn(
-                                  "px-3 py-2 text-sm shadow-sm relative",
+                                  "min-w-0 max-w-full px-3 py-2 text-sm shadow-sm relative",
                                   isMine
                                     ? "bg-primary text-primary-foreground"
                                     : "text-foreground",
@@ -1353,49 +1387,11 @@ export default function Messages() {
                                 }
                               >
                                 {msg.text && (
-                                  <p className="whitespace-pre-wrap break-words leading-relaxed">
-                                    {msgSearchTerm ? highlightText(msg.text, msgSearchQuery.trim()) : msg.text}
-                                  </p>
+                                  <ChatMessageContent text={msg.text} searchQuery={msgSearchQuery.trim()} />
                                 )}
                                 {msg.fileUrl && (
                                   <div className="mt-1">
-                                    {msg.fileType?.startsWith("image/") ? (
-                                      <img
-                                        src={msg.fileUrl}
-                                        alt={msg.fileName ?? "image"}
-                                        className="max-w-full rounded-xl max-h-56 object-cover cursor-pointer"
-                                        onClick={() => window.open(msg.fileUrl!, "_blank")}
-                                      />
-                                    ) : msg.fileType?.startsWith("audio/") ? (
-                                      <div className="flex items-center gap-2 py-1">
-                                        <Mic className="w-4 h-4 flex-shrink-0 opacity-70" />
-                                        <audio
-                                          controls
-                                          src={msg.fileUrl}
-                                          className="h-8 max-w-[200px]"
-                                          style={{ accentColor: "var(--its-primary)" }}
-                                        />
-                                        {msg.fileName && (
-                                          <span className="text-xs opacity-60 truncate max-w-[80px]">{msg.fileName}</span>
-                                        )}
-                                      </div>
-                                    ) : (
-                                      <a
-                                        href={msg.fileUrl}
-                                        download={msg.fileName}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="flex items-center gap-2 text-xs underline opacity-90 py-1"
-                                      >
-                                        <Download className="w-3.5 h-3.5 flex-shrink-0" />
-                                        <span className="truncate">{msg.fileName ?? "Download file"}</span>
-                                        {msg.fileSize && (
-                                          <span className="opacity-60 flex-shrink-0">
-                                            ({(msg.fileSize / 1024).toFixed(0)} KB)
-                                          </span>
-                                        )}
-                                      </a>
-                                    )}
+                                    <ChatAttachment url={msg.fileUrl} type={msg.fileType} name={msg.fileName} />
                                   </div>
                                 )}
                                 {/* Timestamp inside bubble on last in group */}
@@ -1630,8 +1626,13 @@ export default function Messages() {
 
               {/* ── Input Bar ── */}
               <div
+                data-testid="dm-composer"
                 className="flex items-end gap-2 px-3 py-2.5 border-t flex-shrink-0"
-                style={{ borderColor: "var(--its-border)", background: "var(--its-bg)" }}
+                style={{
+                  borderColor: "var(--its-border)",
+                  background: "var(--its-bg)",
+                  paddingBottom: "calc(0.625rem + env(safe-area-inset-bottom, 0px))",
+                }}
               >
                 {/* Hidden file inputs */}
                 <input
@@ -1657,55 +1658,66 @@ export default function Messages() {
                   onChange={(e) => handleFileChange(e, true)}
                 />
 
-                {/* Take and send a photo (mobile) */}
-                <button
-                  className="sm:hidden p-2 rounded-full hover:bg-muted/50 transition-colors flex-shrink-0 mb-0.5"
-                  title="Camera"
-                  aria-label="Take photo"
-                  onClick={() => cameraInputRef.current?.click()}
-                  disabled={uploading || sendMutation.isPending}
-                >
-                  <Camera className="w-5 h-5" style={{ color: "var(--its-primary)" }} />
-                </button>
-
-                {/* Attach image */}
-                <button
-                  className="p-2 rounded-full hover:bg-muted/50 transition-colors flex-shrink-0 mb-0.5"
-                  title="Send image"
-                  onClick={() => imageInputRef.current?.click()}
-                  disabled={uploading || sendMutation.isPending}
-                >
-                  <ImageIcon className="w-5 h-5" style={{ color: "var(--its-primary)" }} />
-                </button>
-
-                {/* Attach file */}
-                <button
-                  className="p-2 rounded-full hover:bg-muted/50 transition-colors flex-shrink-0 mb-0.5"
-                  title="Attach file (max 3 MB)"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading || sendMutation.isPending}
-                >
-                  <Paperclip className="w-5 h-5" style={{ color: "var(--its-primary)" }} />
-                </button>
-                {/* GIF picker */}
-                <div className="relative flex-shrink-0">
-                  <button
-                    className={cn("p-2 rounded-full hover:bg-muted/50 transition-colors mb-0.5", showGifPicker && "bg-primary/10")}
-                    title="Send GIF"
-                    onClick={() => setShowGifPicker((v) => !v)}
-                    disabled={uploading || sendMutation.isPending}
-                  >
-                    <Gift className="w-5 h-5" style={{ color: "var(--its-primary)" }} />
-                  </button>
+                {/* Attachments menu and its anchored GIF picker */}
+                <div className="relative flex-shrink-0 mb-0.5">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn("rounded-full w-10 h-10", showGifPicker && "bg-primary/10")}
+                        title="Add attachment"
+                        aria-label="Add attachment"
+                        data-testid="dm-attachments-menu"
+                        disabled={uploading || sendMutation.isPending}
+                      >
+                        <Plus className="w-5 h-5" style={{ color: "var(--its-primary)" }} />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      side="top"
+                      align="start"
+                      className="z-[90] w-52"
+                      onCloseAutoFocus={(e) => {
+                        if (showGifPicker) {
+                          e.preventDefault();
+                          gifPickerRef.current?.querySelector("input")?.focus();
+                        }
+                      }}
+                    >
+                      <DropdownMenuItem className="min-h-11" onSelect={() => cameraInputRef.current?.click()}>
+                        <Camera />
+                        Take photo
+                      </DropdownMenuItem>
+                      <DropdownMenuItem className="min-h-11" onSelect={() => imageInputRef.current?.click()}>
+                        <ImageIcon />
+                        Send image
+                      </DropdownMenuItem>
+                      <DropdownMenuItem className="min-h-11" onSelect={() => fileInputRef.current?.click()}>
+                        <Paperclip />
+                        Attach file (max 3 MB)
+                      </DropdownMenuItem>
+                      <DropdownMenuItem className="min-h-11" onSelect={() => setShowGifPicker(true)}>
+                        <Gift />
+                        Send GIF
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   {showGifPicker && (
                     <div
                       ref={gifPickerRef}
-                      className="absolute bottom-full mb-2 left-0 z-40 rounded-2xl shadow-2xl border overflow-hidden"
-                      style={{ background: "var(--its-card)", borderColor: "var(--its-border)", width: "300px" }}
+                      role="dialog"
+                      aria-label="Choose a GIF"
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") setShowGifPicker(false);
+                      }}
+                      className="absolute bottom-full mb-2 left-0 z-[60] rounded-2xl shadow-2xl border overflow-hidden"
+                      style={{ background: "var(--its-card)", borderColor: "var(--its-border)", width: "300px", maxWidth: "calc(100vw - 1.5rem)" }}
                     >
-                      <div className="p-2 border-b" style={{ borderColor: "var(--its-border)" }}>
+                      <div className="flex items-center gap-1 p-2 border-b" style={{ borderColor: "var(--its-border)" }}>
                         <input
                           autoFocus
+                          aria-label="Search GIFs"
                           value={gifSearch}
                           onChange={(e) => {
                             setGifSearch(e.target.value);
@@ -1714,9 +1726,16 @@ export default function Messages() {
                             return () => clearTimeout(t);
                           }}
                           placeholder="Search GIFs..."
-                          className="w-full px-3 py-1.5 text-sm rounded-lg border-0 outline-none"
+                          className="flex-1 min-w-0 px-3 py-1.5 text-base md:text-sm rounded-lg border-0 outline-none"
                           style={{ background: "var(--its-bg)", color: "var(--its-text-primary)" }}
                         />
+                        <button
+                          className="p-2 rounded-full hover:bg-muted/50"
+                          aria-label="Close GIF picker"
+                          onClick={() => setShowGifPicker(false)}
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
                       </div>
                       <div className="grid grid-cols-3 gap-1 p-2 max-h-48 overflow-y-auto">
                         {gifLoading && (
@@ -1728,6 +1747,8 @@ export default function Messages() {
                           <button
                             key={gif.id}
                             onClick={() => sendGif(gif.url)}
+                            aria-label={`Send GIF ${gif.id}`}
+                            disabled={uploading || sendMutation.isPending}
                             className="rounded-lg overflow-hidden hover:opacity-80 transition-opacity aspect-video"
                           >
                             <img src={gif.preview} alt="gif" className="w-full h-full object-cover" loading="lazy" />
@@ -1743,7 +1764,7 @@ export default function Messages() {
                 </div>
                 {/* Text input */}
                 <div
-                  className="flex-1 flex items-end rounded-2xl px-3 py-2 border"
+                  className="flex-1 min-w-0 flex items-end rounded-2xl px-3 py-2 border"
                   style={{
                     background: "var(--its-card)",
                     borderColor: "var(--its-border)",
@@ -1753,10 +1774,12 @@ export default function Messages() {
                   <textarea
                     ref={inputRef}
                     value={text}
+                    aria-label="Message"
+                    data-testid="dm-message-input"
                     onChange={handleTextInput}
                     placeholder="Aa"
                     rows={1}
-                    className="flex-1 bg-transparent border-0 outline-none resize-none text-sm leading-relaxed"
+                    className="w-full min-w-0 flex-1 bg-transparent border-0 outline-none resize-none text-base md:text-sm leading-relaxed"
                     style={{
                       color: "var(--its-text-primary)",
                       maxHeight: "120px",
@@ -1780,6 +1803,7 @@ export default function Messages() {
                       className="p-2.5 rounded-full bg-green-500 text-white shadow-sm hover:opacity-90 active:scale-95 transition-all"
                       onClick={stopRecording}
                       title="Send voice message"
+                      aria-label="Send voice message"
                     >
                       <Send className="w-4 h-4" />
                     </button>
@@ -1787,6 +1811,7 @@ export default function Messages() {
                       className="p-2.5 rounded-full bg-muted text-muted-foreground hover:bg-red-100 hover:text-red-500 transition-all"
                       onClick={cancelRecording}
                       title="Cancel recording"
+                      aria-label="Cancel recording"
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -1797,6 +1822,7 @@ export default function Messages() {
                     onClick={handleSend}
                     disabled={sendMutation.isPending || uploading}
                     title="Send message"
+                    aria-label="Send message"
                   >
                     <Send className="w-4 h-4" />
                   </button>
@@ -1805,6 +1831,8 @@ export default function Messages() {
                     className="p-2.5 rounded-full flex-shrink-0 mb-0.5 bg-primary text-primary-foreground shadow-sm hover:opacity-90 active:scale-95 transition-all"
                     onClick={startRecording}
                     title="Record voice message"
+                    aria-label="Record voice message"
+                    disabled={sendMutation.isPending || uploading || uploadVoiceMutation.isPending}
                   >
                     <Mic className="w-4 h-4" />
                   </button>
@@ -1818,7 +1846,7 @@ export default function Messages() {
       {/* ── Forward Modal ──────────────────────────────────────────────────── */}
       {forwardMsgId !== null && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50"
           onClick={() => { setForwardMsgId(null); setForwardSearch(""); }}
         >
           <div

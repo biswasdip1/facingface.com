@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME, ONE_YEAR_MS, POST_WORD_LIMIT } from "@shared/const";
 import { POST_FEELING_VALUES } from "@shared/postSocialMetadata";
+import { GROUP_CALL_MAX_PARTICIPANTS, groupCallSignalInputSchema } from "@shared/groupCall";
 import { LIVE_STREAM_DURATION_MS, liveStreamDeadline } from "@shared/liveStream";
 import { registerLiveStreamDeadline, endLiveStreamSession } from "./liveStream";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -174,6 +175,7 @@ import {
   getGroupMessages,
   createCallRoom,
   getCallRoom,
+  getActiveCallRoomForGroup,
   joinCallRoom,
   leaveCallRoom,
   getActiveCallParticipants,
@@ -2869,75 +2871,120 @@ const blocksRouter = router({
 
 // ─── DM Mute (on dm router) ───────────────────────────────────────────────────
 // ─── Calls Router ──────────────────────────────────────────────────────────────
-
 const callsRouter = router({
   /**
    * Returns browser-safe STUN/TURN entries. Provider API credentials remain
    * server-only; an authenticated caller receives only ICE credentials.
    */
   iceServers: protectedProcedure.query(async () => getWebRtcRelayConfig()),
-
   createRoom: protectedProcedure
     .input(z.object({
-      groupId: z.number().optional(),
+      groupId: z.number().int().positive().optional(),
       type: z.enum(["audio", "video"]).default("video"),
     }))
     .mutation(async ({ ctx, input }) => {
-      if (input.groupId) {
-        const isMember = await isGroupMember(input.groupId, ctx.user.id);
-        if (!isMember) throw new TRPCError({ code: "FORBIDDEN", message: "Not a member of this group." });
+      if (input.groupId !== undefined && !await isGroupMember(input.groupId, ctx.user.id)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Not a member of this group." });
       }
       const roomId = await createCallRoom({ groupId: input.groupId, hostId: ctx.user.id, type: input.type });
-      await joinCallRoom(roomId, ctx.user.id);
+      // Explicit Join after media permission succeeds prevents ghost participants.
       return { roomId };
     }),
-
-  getRoom: protectedProcedure
-    .input(z.object({ roomId: z.number() }))
+  activeForGroup: protectedProcedure
+    .input(z.object({ groupId: z.number().int().positive() }))
     .query(async ({ ctx, input }) => {
-      const room = await getCallRoom(input.roomId);
-      if (!room) throw new TRPCError({ code: "NOT_FOUND", message: "Call room not found." });
-      const participants = await getActiveCallParticipants(input.roomId);
-      return { room, participants };
+      if (!await isGroupMember(input.groupId, ctx.user.id)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Not a member of this group." });
+      }
+      return getActiveCallRoomForGroup(input.groupId, ctx.user.id);
     }),
-
-  join: protectedProcedure
-    .input(z.object({ roomId: z.number() }))
-    .mutation(async ({ ctx, input }) => {
-      const room = await getCallRoom(input.roomId);
+  getRoom: protectedProcedure
+    .input(z.object({ roomId: z.number().int().positive() }))
+    .query(async ({ ctx, input }) => {
+      const room = await getCallRoom(input.roomId, ctx.user.id);
       if (!room) throw new TRPCError({ code: "NOT_FOUND", message: "Call room not found." });
+      if (room.groupId !== null ? !await isGroupMember(room.groupId, ctx.user.id) : room.hostId !== ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Not eligible to access this call room." });
+      }
+      const participants = await getActiveCallParticipants(input.roomId, ctx.user.id);
+      // Defense in depth: never serialize a full User, even with a legacy/mock helper.
+      return { room, participants: participants.map(participant => ({
+        id: participant.id, roomId: participant.roomId, userId: participant.userId,
+        joinedAt: participant.joinedAt, leftAt: participant.leftAt,
+        user: { id: participant.user.id, name: participant.user.name, avatar: participant.user.avatar },
+      })) };
+    }),
+  join: protectedProcedure
+    .input(z.object({ roomId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const room = await getCallRoom(input.roomId, ctx.user.id);
+      if (!room) throw new TRPCError({ code: "NOT_FOUND", message: "Call room not found." });
+      if (room.groupId !== null ? !await isGroupMember(room.groupId, ctx.user.id) : room.hostId !== ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Not eligible to join this call room." });
+      }
       if (room.status === "ended") throw new TRPCError({ code: "BAD_REQUEST", message: "This call has ended." });
+      const participants = await getActiveCallParticipants(input.roomId, ctx.user.id);
+      const peerIds = Array.from(new Set(participants.map(participant => participant.userId)));
+      if (!peerIds.includes(ctx.user.id) && peerIds.length >= GROUP_CALL_MAX_PARTICIPANTS) {
+        throw new TRPCError({ code: "CONFLICT", message: "This call is full (maximum 4 participants)." });
+      }
+      for (const peerId of peerIds.filter(id => id !== ctx.user.id)) {
+        const [blocked, blockedBy] = await Promise.all([isUserBlocked(ctx.user.id, peerId), isUserBlocked(peerId, ctx.user.id)]);
+        if (blocked || blockedBy) throw new TRPCError({ code: "FORBIDDEN", message: "A blocked member is participating in this call." });
+      }
+      // Durable helper repeats eligibility/block/capacity checks under a room row lock.
       await joinCallRoom(input.roomId, ctx.user.id);
       return { success: true };
     }),
-
   leave: protectedProcedure
-    .input(z.object({ roomId: z.number() }))
+    .input(z.object({ roomId: z.number().int().positive() }))
     .mutation(async ({ ctx, input }) => {
+      // Helper authorizes current membership OR the caller's own historical row;
+      // removed members can clean up only themselves. Repeated Leave is harmless.
       await leaveCallRoom(input.roomId, ctx.user.id);
       return { success: true };
     }),
-
   sendSignal: protectedProcedure
-    .input(z.object({
-      roomId: z.number(),
-      toUserId: z.number(),
-      type: z.string().max(30),
-      payload: z.string(),
-    }))
+    .input(groupCallSignalInputSchema)
     .mutation(async ({ ctx, input }) => {
+      if (input.toUserId === ctx.user.id) throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot signal yourself." });
+      const room = await getCallRoom(input.roomId, ctx.user.id);
+      if (!room) throw new TRPCError({ code: "NOT_FOUND", message: "Call room not found." });
+      if (room.groupId !== null) {
+        const [senderMember, recipientMember] = await Promise.all([
+          isGroupMember(room.groupId, ctx.user.id), isGroupMember(room.groupId, input.toUserId),
+        ]);
+        if (!senderMember || !recipientMember) throw new TRPCError({ code: "FORBIDDEN", message: "Not a member of this group." });
+      } else if (room.hostId !== ctx.user.id || room.hostId !== input.toUserId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Not eligible to signal in this call room." });
+      }
+      if (room.status === "ended") throw new TRPCError({ code: "BAD_REQUEST", message: "This call has ended." });
+      const participants = await getActiveCallParticipants(input.roomId, ctx.user.id);
+      if (![ctx.user.id, input.toUserId].every(id => participants.some(row => row.userId === id))) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Both users must join this call before signaling." });
+      }
+      const [blocked, blockedBy] = await Promise.all([isUserBlocked(ctx.user.id, input.toUserId), isUserBlocked(input.toUserId, ctx.user.id)]);
+      if (blocked || blockedBy) throw new TRPCError({ code: "FORBIDDEN", message: "A blocked member is participating in this call." });
       await sendCallSignal({ roomId: input.roomId, fromUserId: ctx.user.id, toUserId: input.toUserId, type: input.type, payload: input.payload });
       return { success: true };
     }),
-
   pollSignals: protectedProcedure
-    .input(z.object({ roomId: z.number() }))
+    .input(z.object({ roomId: z.number().int().positive() }))
     .query(async ({ ctx, input }) => {
+      const room = await getCallRoom(input.roomId, ctx.user.id);
+      if (!room) throw new TRPCError({ code: "NOT_FOUND", message: "Call room not found." });
+      if (room.groupId !== null ? !await isGroupMember(room.groupId, ctx.user.id) : room.hostId !== ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Not eligible to access this call room." });
+      }
+      if (room.status === "ended") throw new TRPCError({ code: "BAD_REQUEST", message: "This call has ended." });
+      const participants = await getActiveCallParticipants(input.roomId, ctx.user.id);
+      if (!participants.some(row => row.userId === ctx.user.id)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Join this call before signaling." });
+      }
       const signals = await getUnconsumedSignals(input.roomId, ctx.user.id);
       return { signals };
     }),
 });
-
 // ─── Photos Router ────────────────────────────────────────────────────────────
 const photosRouter = router({
   // Profile photos
