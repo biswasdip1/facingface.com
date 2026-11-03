@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `lastCallsSeenAt` timestamp DEFAULT (now()) NOT NULL;

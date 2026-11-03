@@ -1,0 +1,40 @@
+# ─── FacingFace Environment Variables ────────────────────────────────────────
+# Copy this content to a .env file and fill in all values before running.
+
+# ── Database ──────────────────────────────────────────────────────────────────
+DATABASE_URL=mysql://user:password@host:3306/facingface
+
+# ── Authentication ────────────────────────────────────────────────────────────
+JWT_SECRET=your-super-secret-jwt-key-change-this
+
+# ── Email (SMTP) ──────────────────────────────────────────────────────────────
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your-gmail@gmail.com
+SMTP_PASS=your-gmail-app-password
+
+# ── File Storage (S3-compatible) ──────────────────────────────────────────────
+AWS_ACCESS_KEY_ID=your-aws-access-key
+AWS_SECRET_ACCESS_KEY=your-aws-secret-key
+AWS_REGION=us-east-1
+AWS_S3_BUCKET=facingface-media
+
+# ── LLM / AI (for content moderation) ────────────────────────────────────────
+BUILT_IN_FORGE_API_URL=https://api.openai.com/v1
+BUILT_IN_FORGE_API_KEY=sk-your-openai-api-key
+
+# ── Manus OAuth (optional) ────────────────────────────────────────────────────
+VITE_APP_ID=your-manus-app-id
+OAUTH_SERVER_URL=https://api.manus.im
+VITE_OAUTH_PORTAL_URL=https://manus.im
+OWNER_OPEN_ID=your-manus-open-id
+OWNER_NAME=Your Name
+
+# ── Analytics (optional) ──────────────────────────────────────────────────────
+VITE_ANALYTICS_ENDPOINT=
+VITE_ANALYTICS_WEBSITE_ID=
+
+# ── Frontend API access ────────────────────────────────────────────────────────
+VITE_FRONTEND_FORGE_API_URL=https://api.openai.com/v1
+VITE_FRONTEND_FORGE_API_KEY=sk-your-openai-api-key

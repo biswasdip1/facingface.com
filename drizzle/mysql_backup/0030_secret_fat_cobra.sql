@@ -1,0 +1,1 @@
+ALTER TABLE `posts` ADD `isPinned` boolean DEFAULT false NOT NULL;
