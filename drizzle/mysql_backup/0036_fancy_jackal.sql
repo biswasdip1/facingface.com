@@ -1,1 +1,0 @@
-ALTER TABLE `posts` ADD `hideEditHistory` boolean DEFAULT false NOT NULL;
