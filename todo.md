@@ -23,3 +23,15 @@ Based on the exact uploaded `FacingFace-Website-2026-11-04-Self-Delete-Deploy.zi
 - [x] Chromium synthetic-user layout tests passed at 640,768,820,1024,1280,1366,1434,1536,1920. Simulated native feed: zero document-wide non-passive pull listeners; browser feed: one. No actual iPhone performance measurement claimed.
 - [x] Complete clean ZIP preserves every original file, earlier login repair/deletion safeguards, dependency lockfile and Render settings; no signing credentials or generated output included.
 - [ ] User deploys the latest complete source to the existing Render service, verifies the new commit/health, closes/reopens TestFlight and compares same-feed scrolling on the actual iPhone. No new IPA/AAB or store submission performed for these website changes.
+
+## 10 November — Home-only shortcut menu adjustment and location audit
+
+- [x] Kept the organization Page layout/shared header unchanged; balanced the Home menu/feed/news columns only.
+- [x] Added theme-aware Explore FacingFace menu; desktop remains open, mobile/tablet starts collapsed with accessible Menu toggle and focus styles.
+- [x] Retained existing shortcut routes, posts/ads, native-free purchase exclusions and prior scroll/deletion/login repairs.
+- [x] TypeScript and production build passed; included suite: 330 passed, 11 opt-in database tests skipped in this latest run.
+- [x] Synthetic-browser Home interaction/geometry tests passed at 375,390,640,768,1024,1280,1401,1434,1536,1920; existing header/listener checks also passed. Theme text/background differentiation and native-free purchase restriction checked.
+- [x] Read-only location audit: manual public profile city/location, typed check-ins; People You May Know uses mutual friends, not distance. No GPS/proximity collection added or enabled.
+- [x] Complete new ZIP accumulates every previous repair file; credentials, generated output and test fixtures excluded.
+- [ ] User deploys newest ZIP through same existing Render-connected repository and reloads Home. No production action performed here.
+- [ ] Optional future feature: confirm city/area vs foreground approximate GPS, audience/age safeguards and retention/disable semantics before implementing Nearby discovery or changing store privacy declarations.

@@ -1,6 +1,14 @@
-# FacingFace complete login, header and native scroll repair — 10 November 2026
+# FacingFace complete Home menu, login, header and native scroll update — 10 November 2026
 
 This complete website package starts from your exact uploaded `FacingFace-Website-2026-11-04-Self-Delete-Deploy.zip`. Every original file is retained. The existing website, self-service account deletion, media/call repairs, November branding and normal-browser subscriptions are preserved. This is website source, not a new Android AAB or iOS IPA.
+
+## Latest Home/feed menu update
+
+This ZIP includes every preceding login/header/scroll repair plus a Home-only **Explore FacingFace** shortcut menu. Desktop uses balanced menu/feed/news columns; mobile/tablet starts with a compact collapsed Menu toggle. Profile viewers, Your Page, Public Group, Sale & Buy, More, Birthdays and Events retain their real destinations. Website-only verification purchase links remain excluded from free-native sessions. Menu colors use the existing theme variables. The organisation Page layout, shared header, posts, ads, account-deletion backend, subscriptions and database connection settings are unchanged from the preceding complete repair.
+
+Deploy this newest complete ZIP instead of stacking partial packages or using an older ZIP. Follow the same existing-Render/repository instructions below. This Home-only change needs no database schema update or new IPA/AAB. After deployment, reload Home or close/reopen the existing app. Local synthetic-data checks passed at 375,390,640,768,1024,1280,1401,1434,1536,1920; the preceding responsive header and zero-blocking-native-touch-listener checks also still pass. TypeScript/production build passed and the included suite passed 330 tests, with 11 database opt-in tests skipped in this latest run. This is not a new physical-device performance certification.
+
+**Location is not enabled by this update.** The inspected source has manually entered public profile city/location strings and recommendations by mutual friends, not GPS/proximity matching. `LOCATION_FEATURE_STATUS.md` explains the existing behavior and a separate opt-in city/area proposal. No user's location was requested or collected, and no tracking permission, location schema or store declaration changed. A location-discovery implementation requires explicit product/privacy decisions first.
 
 ## Header and TestFlight update — deploy this complete ZIP
 

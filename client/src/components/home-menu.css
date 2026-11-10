@@ -1,0 +1,76 @@
+/* Scope to the Home feed; do not change shared containers or organisation Pages. */
+.ff-home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  width: 100%;
+  margin-inline: auto;
+}
+.ff-home-menu {
+  min-width: 0;
+  border: 1px solid var(--its-border);
+  border-radius: 10px;
+  color: var(--its-text-primary);
+  background: var(--its-surface);
+  padding: 12px;
+}
+.ff-home-menu-heading, .ff-home-menu-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ff-home-menu-heading { justify-content: space-between; }
+.ff-home-menu-title { min-width: 0; }
+.ff-home-menu-title > svg { flex-shrink: 0; color: var(--its-red); }
+.ff-home-menu-title h2 { font-size: 13px; font-weight: 800; margin: 0; line-height: 1.4; }
+.ff-home-menu-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  min-height: 40px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--its-text-primary);
+  border: 1px solid var(--its-border);
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.ff-home-menu-toggle:focus-visible, .ff-home-shortcuts a:focus-visible, .ff-home-shortcuts button:focus-visible {
+  outline: 2px solid var(--its-red);
+  outline-offset: 2px;
+}
+.ff-home-shortcuts { display: none; margin-top: 12px; }
+.ff-home-menu[data-open="true"] .ff-home-shortcuts { display: block; }
+.ff-home-shortcuts a {
+  color: var(--its-text-primary);
+  border-color: var(--its-border);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.ff-home-shortcuts > a { border-radius: 6px; padding-block: 12px; }
+.ff-home-shortcuts > a:first-child {
+  background: var(--its-surface-alt);
+  box-shadow: none;
+}
+.ff-home-shortcuts a:hover { background: var(--its-surface-hover); color: var(--its-red); }
+.ff-home-shortcuts button, .ff-home-shortcuts p, .ff-home-shortcuts span.text-slate-500 { color: var(--its-text-secondary); }
+.ff-home-shortcuts div.border-t { border-color: var(--its-border); }
+.ff-home-shortcuts .text-slate-700 { color: var(--its-text-primary); }
+.ff-home-shortcuts .text-slate-500 { color: var(--its-text-muted); }
+.ff-home-news-column { display: none; min-width: 0; }
+@media (min-width: 1024px) {
+  .ff-home-grid { grid-template-columns: 224px minmax(0, 1fr); gap: 24px; }
+  .ff-home-menu { position: sticky; top: 96px; max-height: calc(100dvh - 112px); overflow-y: auto; }
+  .ff-home-menu-heading { padding: 4px 4px 12px; border-bottom: 1px solid var(--its-border); }
+  .ff-home-menu-toggle { display: none; }
+  .ff-home-shortcuts { display: block; }
+}
+@media (min-width: 1280px) {
+  .ff-home-grid { grid-template-columns: 224px minmax(0, 1fr) 280px; }
+  .ff-home-news-column { display: block; }
+}
+@media (min-width: 1536px) {
+  .ff-home-grid { grid-template-columns: 240px minmax(0, 1fr) 300px; }
+}

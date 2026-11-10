@@ -8,6 +8,7 @@ import FeedAd from "@/components/FeedAd";
 import PeopleYouMayKnow from "@/components/PeopleYouMayKnow";
 import SuggestedPages from "@/components/SuggestedPages";
 import ForYouFeed from "@/components/ForYouFeed";
+import HomeMenuFrame from "@/components/HomeMenuFrame";
 
 import { AlertTriangle, Loader2, Radio, Users, RefreshCw, Mail, Play, Eye, MessageCircle, Newspaper, ExternalLink, BadgeCheck, ChevronDown, Gift, CalendarDays, Building2, UsersRound, Megaphone, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
@@ -363,8 +364,8 @@ export default function Feed() {
           </div>
         </div>
       )}
-      <div className="mx-auto grid max-w-[1440px] grid-cols-1 gap-5 lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[250px_minmax(0,700px)_320px] 2xl:grid-cols-[260px_minmax(0,720px)_340px] xl:gap-6">
-        <aside className="hidden lg:block sticky top-24 h-fit rounded-lg border border-slate-200 bg-sky-50/70 p-3 text-sm shadow-sm">
+      <div className="ff-home-grid">
+        <HomeMenuFrame>
           <Link href="/profile" className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-sky-100 bg-white/90 px-2.5 py-3 text-slate-700 shadow-sm transition-colors hover:border-sky-300 hover:text-[var(--its-red)]">
             <span className="flex min-w-0 items-center gap-2"><Eye size={17} className="shrink-0 text-sky-600" /><span className="min-w-0"><span className="block font-bold">Profile viewers</span><span className="block text-[11px] font-medium text-slate-500">Last 30 days</span></span></span>
             <span className="text-lg font-black text-sky-700">{profileViewerSummary?.totalCount ?? 0}</span>
@@ -411,7 +412,7 @@ export default function Feed() {
               </div>
             </div>
           )}
-        </aside>
+        </HomeMenuFrame>
 
         <main className="min-w-0">
 
@@ -647,7 +648,7 @@ export default function Feed() {
         </div>
         </main>
 
-        <div className="hidden xl:block min-w-0">
+        <div className="ff-home-news-column">
           <RightNewsFeed />
         </div>
       </div>
