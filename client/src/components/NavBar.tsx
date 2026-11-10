@@ -8,6 +8,7 @@ import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useMobileNavigation } from "@/contexts/MobileNavigationContext";
 import { isFreeNativeEdition } from "@/_core/nativeIntegration";
+import "./header-navigation.css";
 
 const THEME_OPTIONS: { mode: ThemeMode; label: string; bg: string; fg: string; ring: string; title: string }[] = [
   { mode: "white",     label: "W",  bg: "#ffffff", fg: "#111111", ring: "#cccccc", title: "White" },
@@ -239,6 +240,15 @@ export default function NavBar() {
 
       {user && <a href="/member-card" className="flex items-center gap-3 px-4 py-2.5 text-xs font-semibold no-underline transition-colors border-b hover:bg-muted" style={{ color: "var(--its-text-primary)", borderColor: "var(--its-border)" }} onClick={() => setDropdownOpen(false)}><BookImage size={14} style={{ color: "var(--its-text-muted)" }} />My Member Card<span className="ml-auto text-[10px] font-normal" style={{ color: "var(--its-text-muted)" }}>Optional</span></a>}
 
+      {/* Routes moved out of the crowded header remain one click away. */}
+      <div className="ff-header-overflow-links border-b" aria-label="More navigation" style={{ borderColor: "var(--its-border)" }}>
+        {navItems.filter(({ label }) => !["Home", "Profile", "Messages"].includes(label)).map(({ href, label, icon: Icon }) => (
+          <a key={label} href={href} data-header-route={href} className="ff-header-overflow-link flex items-center gap-3 px-4 py-2.5 text-xs font-semibold no-underline hover:bg-muted" style={{ color: "var(--its-text-primary)" }} onClick={() => setDropdownOpen(false)}>
+            <Icon size={14} style={{ color: "var(--its-text-muted)", flexShrink: 0 }} />{label}
+          </a>
+        ))}
+      </div>
+
       {/* Nav links — Home top-level, sub-items collapse/expand on tap */}
       <div className="border-b" style={{ borderColor: "var(--its-border)" }}>
         {/* Home — toggle button */}
@@ -457,6 +467,15 @@ export default function NavBar() {
       >
         <Lock size={14} style={{ color: "var(--its-text-muted)" }} />
         Security
+      </a>
+      <a
+        href="/security#delete-account"
+        className="flex items-center gap-3 px-4 py-2.5 text-xs font-semibold no-underline transition-colors border-b hover:bg-muted"
+        style={{ color: "var(--its-text-primary)", borderColor: "var(--its-border)" }}
+        onClick={() => setDropdownOpen(false)}
+      >
+        <User size={14} style={{ color: "var(--its-text-muted)" }} />
+        Delete my account
       </a>
       {/* Blocked Users */}
       <a
@@ -725,7 +744,7 @@ export default function NavBar() {
         <Link href="/" className="hidden sm:flex items-center gap-2 no-underline flex-shrink-0">
           <BrandMark size={30} decorative />
           <span
-            className="hidden sm:block font-black text-sm xl:text-base select-none whitespace-nowrap"
+            className="ff-desktop-brand-wordmark font-black text-sm xl:text-base select-none whitespace-nowrap"
             style={{ color: "var(--its-text-primary)", letterSpacing: "-0.02em" }}
           >
             FacingFace<span
@@ -736,7 +755,7 @@ export default function NavBar() {
         </Link>
 
         {/* Desktop Search bar */}
-        <div ref={searchRef} className="relative hidden lg:flex items-center flex-1 max-w-xs xl:max-w-sm 2xl:max-w-md">
+        <div ref={searchRef} className="ff-desktop-search relative hidden xl:flex items-center flex-1 max-w-sm 2xl:max-w-md">
           <div
             className="flex items-center gap-2 px-3 py-1.5 border w-full"
             style={{ borderColor: "var(--its-border)", backgroundColor: "var(--its-surface)" }}
@@ -800,15 +819,19 @@ export default function NavBar() {
           )}
         </div>
 
+        <Link href="/search" className="hidden sm:flex xl:hidden w-9 h-9 items-center justify-center flex-shrink-0 rounded-full no-underline" aria-label="Search people" style={{ color: "var(--its-text-muted)" }}>
+          <Search size={20} />
+        </Link>
+
         {/* Desktop Nav icons */}
-        <nav className="hidden sm:flex items-center gap-0 flex-1 min-w-0 overflow-x-auto scrollbar-none">
-          {navItems.map(({ href, label, icon: Icon, superAdmin }) => {
+        <nav aria-label="Main navigation" className="ff-desktop-primary hidden sm:flex items-center gap-0">
+          {navItems.filter(({ label }) => !["Scheduled", "Trending"].includes(label)).map(({ href, label, icon: Icon, superAdmin }) => {
             const isActive =
               href === "/" ? location === "/" : location.startsWith(href.split("?")[0]);
             const isProfile = label === "Profile";
             const isSuperAdminItem = Boolean(superAdmin);
             return (
-              <span key={label}>
+              <span key={label} data-header-route={href} className="ff-header-primary-item">
                 <Link
                   href={href}
                   onClick={(e) => {
@@ -869,7 +892,7 @@ export default function NavBar() {
                       </span>
                     )}
                   </span>
-                  <span className="mt-0.5">{label}</span>
+                  <span className="mt-0.5 whitespace-nowrap">{label}</span>
                 </Link>
               </span>
             );

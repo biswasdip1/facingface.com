@@ -12,3 +12,14 @@ Based on the exact uploaded `FacingFace-Website-2026-11-04-Self-Delete-Deploy.zi
 - [x] Real compiled-server/browser test passed: legacy startup, account/paid subscription preservation, password login, public deletion page, paid-deletion blocking, disposable self-delete/sign-out, personal-file purge and peer preservation. No physical-device certification claimed.
 - [x] Updated deployment/SQL documentation; package will exclude dependencies, compiled output, test fixtures, logs, credentials and screenshots while retaining all original source files.
 - [ ] User backs up the existing database/media, deploys ZIP contents through the existing repository/Render service and verifies live login, subscriptions and account deletion. No mobile binary rebuild or public rollout is required for this backend repair.
+
+## 10 November — header and existing TestFlight scrolling update
+
+- [x] Identified the cropped label after Saved from the supplied screenshot; replaced clipped primary navigation with responsive whole-item layout and accessible settings-menu overflow routes.
+- [x] Added Settings → Delete my account shortcut to the existing protected Security confirmation page; no deletion executed.
+- [x] Disabled the custom document-wide non-passive pull-to-refresh handler only in explicitly marked native sessions; browser behavior retained. Native Home remains the reload action.
+- [x] Coalesced feed load-more layout reads into animation frames with a duplicate-request guard; removed loaded full-size blurred image placeholders and added asynchronous image decoding.
+- [x] Final TypeScript check and production build passed. Latest included suite: 327 passed; 11 opt-in database tests skipped (prior isolated repair SQL/browser tests remain recorded above).
+- [x] Chromium synthetic-user layout tests passed at 640,768,820,1024,1280,1366,1434,1536,1920. Simulated native feed: zero document-wide non-passive pull listeners; browser feed: one. No actual iPhone performance measurement claimed.
+- [x] Complete clean ZIP preserves every original file, earlier login repair/deletion safeguards, dependency lockfile and Render settings; no signing credentials or generated output included.
+- [ ] User deploys the latest complete source to the existing Render service, verifies the new commit/health, closes/reopens TestFlight and compares same-feed scrolling on the actual iPhone. No new IPA/AAB or store submission performed for these website changes.

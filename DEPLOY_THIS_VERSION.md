@@ -1,6 +1,16 @@
-# FacingFace Render login repair — 10 November 2026
+# FacingFace complete login, header and native scroll repair — 10 November 2026
 
 This complete website package starts from your exact uploaded `FacingFace-Website-2026-11-04-Self-Delete-Deploy.zip`. Every original file is retained. The existing website, self-service account deletion, media/call repairs, November branding and normal-browser subscriptions are preserved. This is website source, not a new Android AAB or iOS IPA.
+
+## Header and TestFlight update — deploy this complete ZIP
+
+The latest package also fixes the clipped menu label beside Saved. Primary header items stay whole; Scheduled/Trending and other routes that do not fit at narrower widths are available from the existing settings menu. Search stays available as an icon on smaller layouts. Account controls remain separate, and the menu includes a **Delete my account** shortcut to the existing protected confirmation screen. The shortcut does not itself delete an account.
+
+In explicitly marked native app sessions, the feed no longer installs the custom page-wide, non-passive pull-to-refresh touch listener. Ordinary browser sessions retain their existing pull gesture. In the native app, use its **Home** button to reload the feed. Infinite-feed measurements are coalesced to animation frames and duplicate requests during one load are guarded. Loaded post images no longer retain a second full-resolution blurred placeholder; actual images decode asynchronously. Posts, ads, messaging, media URLs and purchase restrictions are not removed.
+
+These are hosted website changes, compatible with the already uploaded remote-backed **TestFlight 1.0 build 5** and Android **10005**. No native source, signing key, app version or binary was changed. Deploy through the same existing Render repository using the instructions below. After Render reports the new commit live, completely close/reopen the TestFlight app, tap Home and compare scrolling through the same feed with Safari. Test centered vertical swipes at the top and middle of the feed; distinguish finger movement from post-release momentum. If a cache still shows old assets, use **Retry or tools → Open website** where available, or re-open the app; avoid deleting app data because local drafts may be lost.
+
+The header geometry/whole-label checks passed in Chromium at widths 640, 768, 820, 1024, 1280, 1366, 1434, 1536 and 1920, including a synthetic super-admin account with extra controls. The simulated native session had **zero document-wide non-passive pull listeners**; browser mode retained one. These are source/layout/listener checks, not an actual iPhone performance measurement. The user's reported scrolling improvement must be verified on the same physical iPhone after deployment. If a remaining issue is native edge gestures, inertia or native bar layout, investigate that separately; those native changes would require a new IPA rather than another website-only promise.
 
 ## What caused the login failure
 

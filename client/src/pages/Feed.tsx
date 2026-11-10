@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import { Link } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { usePullToRefresh } from "@/hooks/usePullToRefresh";
-import { isFreeNativeEdition } from "@/_core/nativeIntegration";
+import { isFreeNativeEdition, isNativeApp } from "@/_core/nativeIntegration";
 
 type InlineReel = {
   id: number;
@@ -248,19 +248,29 @@ export default function Feed() {
 
   // Load more posts when user scrolls to bottom
   useEffect(() => {
-    const handleScroll = () => {
-      if (feedMode !== "latest" || isLoadingMore || !hasMore || feedLoading) return;
+    let frame = 0;
+    let requested = false;
+    const measureScroll = () => {
+      frame = 0;
+      if (feedMode !== "latest" || isLoadingMore || !hasMore || feedLoading || requested) return;
 
-      const { scrollTop, scrollHeight, clientHeight } = document.documentElement;
+      const { scrollTop, scrollHeight, clientHeight } = document.scrollingElement ?? document.documentElement;
       // Trigger load when user is 500px from bottom
       if (scrollTop + clientHeight >= scrollHeight - 500) {
+        requested = true;
         setIsLoadingMore(true);
         setOffset((prev) => prev + limit);
       }
     };
+    const handleScroll = () => {
+      if (!frame) frame = window.requestAnimationFrame(measureScroll);
+    };
 
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", handleScroll);
+    };
   }, [feedMode, isLoadingMore, hasMore, feedLoading, limit]);
 
   // Collect unique author IDs from the feed to check for active stories
@@ -293,7 +303,9 @@ export default function Feed() {
     await Promise.all([refetch(), refetchLive()]);
     if (feedMode === "forYou" && user) await utils.recommendations.feed.invalidate({ viewerId: user.id });
   }, [refetch, refetchLive, feedMode, user?.id, utils]);
-  const { pullDistance, isRefreshing } = usePullToRefresh({ onRefresh: handleRefresh });
+  // WKWebView/Android WebView own the page's touch scrolling. Do not attach a
+  // document-wide, non-passive gesture interceptor inside the native shell.
+  const { pullDistance, isRefreshing } = usePullToRefresh({ onRefresh: handleRefresh, disabled: isNativeApp() });
 
   const postIds = useMemo(
     () => allPosts.map((p: { id: number }) => p.id) ?? [],

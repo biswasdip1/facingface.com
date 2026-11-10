@@ -926,7 +926,7 @@ function PostImageCell({ src, alt, single, onClick, tooltip }: { src: string; al
       {isVisible && (
         <>
           {/* Blurred placeholder — same URL rendered with heavy blur as cheap LQIP */}
-          {!errored && (
+          {!errored && !loaded && (
             <img
               src={src}
               alt=""
@@ -957,6 +957,7 @@ function PostImageCell({ src, alt, single, onClick, tooltip }: { src: string; al
               className={`relative w-full object-cover block transition-opacity duration-500 hover:opacity-90 ${single ? "max-h-[480px]" : "h-full"} ${loaded ? "opacity-100" : "opacity-0"}`}
               style={{ pointerEvents: "none" }}
               loading="eager"
+              decoding="async"
               onLoad={() => setLoaded(true)}
               onError={() => { setLoaded(true); setErrored(true); }}
             />

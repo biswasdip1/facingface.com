@@ -1,0 +1,65 @@
+/* Keep entire navigation items visible; never crop the next label behind gear/sign-out. */
+.ff-desktop-primary {
+  flex: 1 1 auto;
+  min-width: max-content;
+  justify-content: center;
+}
+.ff-header-primary-item {
+  flex: 0 0 auto;
+}
+.ff-desktop-search {
+  min-width: 128px;
+}
+.ff-desktop-brand-wordmark {
+  display: none;
+}
+.ff-header-overflow-links {
+  display: none;
+}
+@media (min-width: 640px) {
+  .ff-header-overflow-links {
+    display: block;
+  }
+  .ff-header-overflow-link {
+    display: none;
+  }
+  .ff-header-overflow-link[data-header-route="/scheduled"],
+  .ff-header-overflow-link[data-header-route="/trending"] {
+    display: flex;
+  }
+}
+@media (min-width: 1024px) {
+  .ff-desktop-brand-wordmark {
+    display: block;
+  }
+}
+@media (min-width: 640px) and (max-width: 1279px) {
+  .ff-header-primary-item[data-header-route="/groups"],
+  .ff-header-primary-item[data-header-route="/reels"] {
+    display: none;
+  }
+  .ff-header-overflow-link[data-header-route="/groups"],
+  .ff-header-overflow-link[data-header-route="/reels"] {
+    display: flex;
+  }
+}
+@media (min-width: 640px) and (max-width: 1023px) {
+  .ff-header-primary-item[data-header-route="/notifications"],
+  .ff-header-primary-item[data-header-route="/calls"] {
+    display: none;
+  }
+  .ff-header-overflow-link[data-header-route="/notifications"],
+  .ff-header-overflow-link[data-header-route="/calls"] {
+    display: flex;
+  }
+}
+@media (min-width: 640px) and (max-width: 767px) {
+  .ff-header-primary-item[data-header-route="/friends"],
+  .ff-header-primary-item[data-header-route="/saved"] {
+    display: none;
+  }
+  .ff-header-overflow-link[data-header-route="/friends"],
+  .ff-header-overflow-link[data-header-route="/saved"] {
+    display: flex;
+  }
+}

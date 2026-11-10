@@ -65,6 +65,12 @@ export function usePullToRefresh({
   }, [pullDistance, threshold, onRefresh]);
 
   useEffect(() => {
+    if (disabled) {
+      startYRef.current = null;
+      isDraggingRef.current = false;
+      setPullDistance(0);
+      return;
+    }
     document.addEventListener("touchstart", handleTouchStart, { passive: true });
     document.addEventListener("touchmove", handleTouchMove, { passive: false });
     document.addEventListener("touchend", handleTouchEnd, { passive: true });
@@ -73,7 +79,7 @@ export function usePullToRefresh({
       document.removeEventListener("touchmove", handleTouchMove);
       document.removeEventListener("touchend", handleTouchEnd);
     };
-  }, [handleTouchStart, handleTouchMove, handleTouchEnd]);
+  }, [disabled, handleTouchStart, handleTouchMove, handleTouchEnd]);
 
   return { pullDistance, isRefreshing };
 }
