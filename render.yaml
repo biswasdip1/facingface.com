@@ -1,0 +1,82 @@
+# ─── render.yaml ─────────────────────────────────────────────────────────────
+# Render.com Blueprint for FacingFace
+#
+# The attached disk stores user-uploaded media. It must remain attached at
+# /var/data for uploads to survive deploys and restarts.
+
+services:
+  - type: web
+    name: facingface
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/_core/index.js
+    healthCheckPath: /api/health
+    autoDeploy: true
+    disk:
+      name: facingface-media
+      mountPath: /var/data
+      sizeGB: 10
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      # Gmail sender identity. SMTP_USER must be the same Gmail account unless
+      # Gmail has a separately verified sending alias.
+      - key: SMTP_FROM
+        value: '"FacingFace" <direct.letter@gmail.com>'
+      - key: SMTP_TEST_RECIPIENT
+        value: direct.letter@gmail.com
+      - key: PUBLIC_APP_URL
+        value: https://www.facingface.com
+
+      # Render-native media storage: photos, videos, audio, documents, profile
+      # pictures, Page covers, and Public Group covers are stored under /var/data.
+      - key: MEDIA_STORAGE_DRIVER
+        value: disk
+      - key: MEDIA_STORAGE_PATH
+        value: /var/data/media
+      - key: MEDIA_PUBLIC_PATH
+        value: /media
+
+      # The previously deployed Forge key is invalid outside Manus. Leave the
+      # external moderation switch off unless a valid replacement is deliberately
+      # configured; otherwise every media upload generates a 401 in Render logs.
+      - key: CONTENT_MODERATION_ENABLED
+        value: "false"
+
+      # Existing deployed databases do not re-run a migration history that is
+      # known to contain an already-created enum. Use true once, only for a
+      # deliberate migration after a database backup has been verified.
+      - key: RUN_DATABASE_MIGRATIONS_ON_STARTUP
+        value: "false"
+
+      # Optional non-media Forge functions. These variables are not used for
+      # production file uploads by this archive.
+      - key: BUILT_IN_FORGE_API_URL
+        sync: false
+      - key: BUILT_IN_FORGE_API_KEY
+        sync: false
+      - key: VITE_APP_ID
+        sync: false
+      - key: OAUTH_SERVER_URL
+        value: https://api.manus.im
+      - key: VITE_OAUTH_PORTAL_URL
+        value: https://manus.im
+      - key: OWNER_OPEN_ID
+        sync: false
+      - key: OWNER_NAME
+        sync: false

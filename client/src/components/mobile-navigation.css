@@ -1,0 +1,57 @@
+.ff-scroll-navigation {
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease;
+}
+
+@media (max-width: 639px) {
+  .ff-scroll-navigation {
+    transition:
+      transform 180ms ease-out,
+      visibility 180ms,
+      background-color 200ms ease,
+      border-color 200ms ease;
+  }
+
+  .ff-scroll-navigation[data-scroll-hidden="true"] {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .ff-mobile-top-navigation[data-scroll-hidden="true"] {
+    transform: translateY(calc(-100% - 2px));
+  }
+
+  .ff-mobile-bottom-navigation[data-scroll-hidden="true"] {
+    transform: translateY(calc(100% + 2px));
+  }
+
+  .ff-mobile-bottom-navigation {
+    height: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ff-scroll-navigation {
+    transition: none;
+  }
+}
+
+@media (max-width: 359px) {
+  .ff-mobile-header-tools > button,
+  .ff-mobile-header-tools > a {
+    width: 34px;
+    height: 40px;
+  }
+
+  .ff-mobile-brand > span {
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 639px) {
+  .ff-mobile-page-content {
+    padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+  }
+}
