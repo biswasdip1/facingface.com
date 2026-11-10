@@ -5,6 +5,16 @@ import type { TrpcContext } from "./context";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
+  errorFormatter({ shape, error }) {
+    if (process.env.NODE_ENV === "production" && error.code === "INTERNAL_SERVER_ERROR") {
+      return {
+        ...shape,
+        message: "FacingFace encountered a server problem. Please try again shortly or contact support.",
+        data: { ...shape.data, stack: undefined },
+      };
+    }
+    return shape;
+  },
 });
 
 export const router = t.router;

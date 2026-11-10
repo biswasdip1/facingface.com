@@ -2,18 +2,19 @@
 
 The active application uses PostgreSQL (`drizzle/schema.ts`, `drizzle.config.ts`). The `mysql_backup/` and nested legacy `migrations/` folders are historical; do not apply them to the deployed PostgreSQL database. Existing migration journals are incomplete and the old full chain contains duplicate enum history. Do not blindly replay the full chain, run schema push with force, or reset an existing database.
 
-## November 2026 upgrade — manual operator review required
+## 10 November login repair — targeted startup compatibility
 
-No deployed migration was run by the source-fix task. Before deploying this version, back up the actual PostgreSQL database and media, inspect the deployed schema against `schema.ts`, and test the upgrade in a restored staging database. Then apply only these additive scripts in order, using a trusted database connection selected by the operator:
+No production database was changed while preparing this ZIP. Back up PostgreSQL/media and inspect or stage the upgrade before deployment. The repaired startup now runs `ensureAccountDeletionSchema` before seeds, routes and the purge worker. It transactionally makes only the missing additive 0015/0016 changes with bounded lock waits and a transaction-scoped startup lock. Existing accounts, paid subscriptions, tombstones and job progress are not rewritten. The global migration journal is not replayed. Empty/wrong base databases and incompatible deletion markers/tables fail explicitly rather than being destructively converted.
+
+The retained SQL files below are optional manual equivalents for an operator; they do not need to be executed separately after the targeted startup step succeeds. If manually applying them, use a reviewed transaction and a trusted connection to the correct database after a backup:
 
 ```bash
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0015_subscription_report_fields.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f drizzle/0016_account_deletion.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 --single-transaction -f drizzle/0015_subscription_report_fields.sql -f drizzle/0016_account_deletion.sql
 ```
 
 `0015` adds nullable subscription `tier`/`expiresAt` and stored report `description`. Existing paid tiers are not inferred or upgraded. `0016` adds `users.deletedAt`, the hashed deleted-login-identity registry, and durable media purge jobs. Both scripts use existence guards and contain no user deletion or cascading cleanup. Existing columns/types with incompatible definitions still require manual investigation; existence guards do not fix incompatible schemas.
 
-Keep `RUN_DATABASE_MIGRATIONS_ON_STARTUP` unset/false in production. These manually reviewed scripts were intentionally not appended to the archive's incomplete global journal. Rollback to old application code does not require dropping the additive fields. Do not remove tombstones/identity hashes, as they prevent stale JWT/OAuth resurrection.
+Keep `RUN_DATABASE_MIGRATIONS_ON_STARTUP` unset/false in production. The targeted helper is independent of that flag, and these reviewed changes were not appended to the archive's incomplete global journal. Render `/api/health` now checks the required deletion fields and reports `accountDeletionSchema: ready` only when they are usable. Rollback to old application code does not require dropping the additive fields. Do not remove tombstones/identity hashes, as they prevent stale JWT/OAuth resurrection.
 
 ## Account deletion operations
 

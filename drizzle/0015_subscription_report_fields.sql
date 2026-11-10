@@ -1,4 +1,4 @@
--- REVIEW ONLY: not executed by the November 2026 source-fix task.
+-- Reviewed manual equivalent of the targeted 10 November startup compatibility step.
 -- PostgreSQL additive migration; do not use the legacy MySQL migration folder.
 -- Review the actual deployment schema and take a backup before applying manually.
 -- Nullable additions do not infer paid tiers, grant badges, or change existing users.

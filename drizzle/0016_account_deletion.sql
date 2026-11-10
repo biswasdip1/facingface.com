@@ -1,5 +1,5 @@
--- REVIEW ONLY. Apply manually after 0015_subscription_report_fields.sql,
--- before deploying code. No deletion/cascade and no automatic runtime migration.
+-- Reviewed manual equivalent of the targeted 10 November startup compatibility step.
+-- Back up first if applying directly. No deletion/cascade or global migration replay.
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS "deletedAt" timestamp;
 CREATE TABLE IF NOT EXISTS public.deleted_account_identities (
   "identityHash" varchar(64) PRIMARY KEY,

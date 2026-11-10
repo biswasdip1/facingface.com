@@ -11,6 +11,7 @@ import { serveStatic, setupVite } from "./vite";
 import { initLiveStreamSocket } from "../liveStream";
 import { registerStripeWebhook } from "../stripeWebhook";
 import { startAccountMediaPurgeWorker } from "../accountMediaPurge";
+import { ensureAccountDeletionSchema } from "../accountDeletionSchema";
 import { deleteExpiredStories, ensureInactiveReminderStorage, ensureLegacyRuntimeSchema, getDb } from "../db";
 import { runAllSeeds } from "../seed";
 import { sql } from "drizzle-orm";
@@ -67,6 +68,14 @@ async function startServer() {
   } else if (process.env.DATABASE_URL) {
     console.info("[DB] Startup migrations skipped; existing production database retained.");
   }
+  // These fixed additive 0015/0016 changes are separate from the unsafe legacy
+  // migration journal. They must finish before any users.deletedAt query runs.
+  if (process.env.DATABASE_URL) {
+    const db = await getDb();
+    if (!db) throw new Error("[DB] Cannot connect for required account-deletion schema validation.");
+    await ensureAccountDeletionSchema(db);
+    console.info("[DB] Account deletion schema ready; existing accounts and subscription rows retained.");
+  }
   // Creates only the missing reminder-history table and indexes for legacy
   // production databases. This remains safe while global migrations are off.
   await ensureInactiveReminderStorage();
@@ -96,20 +105,29 @@ async function startServer() {
   const startTime = Date.now();
   app.get("/api/health", async (_req, res) => {
     let dbStatus = "unreachable";
+    let accountDeletionSchemaStatus = "unavailable";
     try {
       const db = await getDb();
       if (db) {
         await db.execute(sql`SELECT 1`);
         dbStatus = "connected";
+        // Validate required fields without reading or exposing member data.
+        await db.execute(sql`SELECT u."deletedAt", i."identityHash", i."deletedAt", j."userId", j."createdAt", j."completedAt"
+          FROM public.users u
+          LEFT JOIN public.deleted_account_identities i ON false
+          LEFT JOIN public.account_media_purge_jobs j ON false LIMIT 0`);
+        accountDeletionSchemaStatus = "ready";
       }
     } catch {
-      dbStatus = "error";
+      if (dbStatus !== "connected") dbStatus = "error";
+      accountDeletionSchemaStatus = "error";
     }
     const uptimeSeconds = Math.floor((Date.now() - startTime) / 1000);
-    const status = dbStatus === "connected" ? "ok" : "degraded";
+    const status = dbStatus === "connected" && accountDeletionSchemaStatus === "ready" ? "ok" : "degraded";
     res.status(status === "ok" ? 200 : 503).json({
       status,
       db: dbStatus,
+      accountDeletionSchema: accountDeletionSchemaStatus,
       uptime: uptimeSeconds,
       timestamp: new Date().toISOString(),
     });
@@ -154,4 +172,7 @@ async function startServer() {
   });
 }
 
-startServer().catch(console.error);
+startServer().catch(error => {
+  console.error("[Startup] Website initialization failed; refusing to advertise a healthy deployment.", error);
+  process.exit(1);
+});
