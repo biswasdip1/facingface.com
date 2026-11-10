@@ -22,6 +22,10 @@ const FAQ = [
     a: "Sign in, open Security, and use Delete your account. Confirm your current password or verified-email code, your authenticator or backup code if enabled, and type DELETE MY ACCOUNT. Cancel any recurring paid subscription and resolve owned Pages or Groups first. The action is irreversible. See /delete-account for data-retention details and help if you cannot sign in.",
   },
   {
+    q: "Can I request deletion of selected data without deleting my account?",
+    a: "Yes. Open /delete-data, describe the data and relevant links or dates, and submit to support while signed in or send an email without login. Support reviews identity and scope; the request does not automatically delete data, close your account or cancel a subscription. Ask for the completion date, retained-data exceptions and confirmation.",
+  },
+  {
     q: "What are the daily posting limits?",
     a: "To ensure fair use, members can post up to 2 photos, 2 videos, 12 audio clips, 2 polls, 3 live streams, and 2 documents per day. Limits reset every 24 hours.",
   },
@@ -46,6 +50,11 @@ export default function HelpPage() {
           </a>
           .
         </p>
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="text-lg font-bold">Your data controls</h2>
+        <p><a href="/delete-data" className="text-[var(--its-red)] underline">Request deletion of selected data while keeping your account</a>, or use the separate <a href="/delete-account" className="text-[var(--its-red)] underline">account-deletion instructions</a>.</p>
       </section>
 
       <section className="space-y-4">

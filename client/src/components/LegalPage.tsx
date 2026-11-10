@@ -4,6 +4,7 @@ import BrandMark from "./BrandMark";
 interface LegalPageProps {
   title: string;
   children: React.ReactNode;
+  lastUpdated?: string;
 }
 
 const FOOTER_LINKS = [
@@ -13,9 +14,11 @@ const FOOTER_LINKS = [
   { label: "Terms", href: "/terms" },
   { label: "Advertising", href: "/advertising" },
   { label: "Cookies", href: "/cookies" },
+  { label: "Delete account", href: "/delete-account" },
+  { label: "Request data deletion", href: "/delete-data" },
 ];
 
-export default function LegalPage({ title, children }: LegalPageProps) {
+export default function LegalPage({ title, children, lastUpdated = "April 2026" }: LegalPageProps) {
   return (
     <div className="min-h-screen bg-background">
       {/* Top nav */}
@@ -31,7 +34,7 @@ export default function LegalPage({ title, children }: LegalPageProps) {
       {/* Content */}
       <div className="max-w-3xl mx-auto px-4 py-10">
         <h1 className="text-2xl font-bold mb-1">{title}</h1>
-        <p className="text-xs text-muted-foreground mb-8">FacingFace.com · Last updated April 2026</p>
+        <p className="text-xs text-muted-foreground mb-8">FacingFace.com · Last updated {lastUpdated}</p>
         <div className="prose prose-sm max-w-none text-foreground space-y-6">
           {children}
         </div>

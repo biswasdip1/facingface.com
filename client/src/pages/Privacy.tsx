@@ -66,6 +66,7 @@ export default function PrivacyPage() {
           Depending on your location, you may have rights to access, correct, delete, or restrict processing of your personal data. To exercise these rights, contact us at{" "}
           <a href="mailto:direct.letter@gmail.com" className="text-[var(--its-red)] hover:underline">direct.letter@gmail.com</a>.
         </p>
+        <p className="mt-3">To request removal of selected data while keeping your FacingFace account active, use our <a href="/delete-data" className="text-[var(--its-red)] underline">data-deletion request page</a>. Signed-in requests go to the private support inbox; email is available without login. Submission is not automatic deletion. Support must verify ownership and scope, explain the expected completion date and any applicable retention exceptions, and confirm the outcome. Unrequested account information and active billing records remain; this request does not cancel a subscription. No automatic 90-day deletion of all user data is claimed.</p>
       </section>
 
       <section>

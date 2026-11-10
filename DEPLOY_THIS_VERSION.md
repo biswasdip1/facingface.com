@@ -1,6 +1,12 @@
-# FacingFace complete Home menu, login, header and native scroll update — 10 November 2026
+# FacingFace complete data-request, Home menu, login and scroll update — 10 November 2026
 
 This complete website package starts from your exact uploaded `FacingFace-Website-2026-11-04-Self-Delete-Deploy.zip`. Every original file is retained. The existing website, self-service account deletion, media/call repairs, November branding and normal-browser subscriptions are preserved. This is website source, not a new Android AAB or iOS IPA.
+
+## New public data-deletion request link
+
+Deploy this latest complete ZIP before using `https://www.facingface.com/delete-data` in Google Play's optional **Delete data URL** field. It offers a selected-data request while keeping the account active, through the existing private support inbox when signed in or an email draft/manual email without login. No data or subscription is automatically deleted or cancelled. Help, Privacy, account-deletion instructions and legal footers now link to it. The existing account-deletion field remains `https://www.facingface.com/delete-account`; the two fields are not interchangeable.
+
+Read `DATA_DELETION_REQUEST_SETUP.md`. Check the new page in a private browser and verify a clearly labelled non-destructive test reaches your existing support inbox/email. Your team must monitor, verify, fulfil and confirm real requests and disclose actual retention periods. Do not claim automatic universal 90-day deletion or treat resolving a support ticket as deleting data. If this service is not live/operational yet, answer **No** to the optional data-only deletion question rather than publish an undeployed URL. Backend/schema/dependency/signing settings are unchanged. Latest TypeScript/build passed; 335 source tests passed and 11 database opt-in tests were skipped. The request UI tests used synthetic API results, not live support messages.
 
 ## Latest Home/feed menu update
 

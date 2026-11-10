@@ -35,3 +35,15 @@ Based on the exact uploaded `FacingFace-Website-2026-11-04-Self-Delete-Deploy.zi
 - [x] Complete new ZIP accumulates every previous repair file; credentials, generated output and test fixtures excluded.
 - [ ] User deploys newest ZIP through same existing Render-connected repository and reloads Home. No production action performed here.
 - [ ] Optional future feature: confirm city/area vs foreground approximate GPS, audience/age safeguards and retention/disable semantics before implementing Nearby discovery or changing store privacy declarations.
+
+## 10 November — public data-only deletion request link
+
+- [x] Browser-verified existing /delete-account public instructions are live (plain fetch's login fallback was not the actual browser result).
+- [x] Added public /delete-data before AuthGate with authenticated existing support.submit and no-login email draft/manual-email fallback.
+- [x] Clear request-received vs deletion-completed feedback; ownership/scope review, account/subscription preservation, retained-data limitations and no automatic 90-day promise.
+- [x] Added request links in Help, Privacy, account-deletion page and legal footers; did not change backend deletion, database schema, dependencies or native binaries.
+- [x] TypeScript and production build passed. Full suite: 335 passed; 11 opt-in database tests skipped in latest run.
+- [x] Synthetic-browser anonymous, signed-in, failed-submit and auth-unavailable flows passed; only support.submit mutation permitted in test, no destructive endpoint or live request invoked.
+- [x] Complete clean newest ZIP preserves every original file and earlier Home/header/scroll/login/self-deletion repair; excluded secrets, generated output and fixtures.
+- [ ] User deploys newest complete ZIP, checks /delete-data anonymously and verifies a non-destructive test is received in the actual support inbox/email.
+- [ ] Operator monitors, verifies, fulfils and confirms requests, documents real completion/backup/exception retention periods, and only then declares optional data-only request support with the live URL. Do not mark a resolved ticket as proof of actual deletion.

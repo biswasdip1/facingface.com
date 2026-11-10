@@ -66,6 +66,7 @@ import GroupCallInvitation, { isCallInvitation } from "./components/GroupCallInv
 import { isFreeNativeEdition } from "./_core/nativeIntegration";
 import NativePurchasesUnavailable from "./components/NativePurchasesUnavailable";
 import DeleteAccountInfo from "./pages/DeleteAccountInfo";
+import DeleteDataInfo from "./pages/DeleteDataInfo";
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading } = useAuth();
@@ -358,6 +359,7 @@ function Router() {
   if (path === "/help") return <HelpPage />;
   if (path === "/privacy") return <PrivacyPage />;
   if (path === "/delete-account") return <DeleteAccountInfo />;
+  if (path === "/delete-data") return <DeleteDataInfo />;
   if (path === "/terms") return <TermsPage />;
   if (path === "/advertising") return <AdvertisingPage />;
   if (path === "/cookies") return <CookiesPage />;

@@ -13,6 +13,7 @@ export default function DeleteAccountInfo() {
       </section>}
       <section className="space-y-3">
         <p>You can delete your own FacingFace account from the browser website or from the FacingFace mobile app. You do not need to email support for an ordinary account that you can sign in to.</p>
+        <p>Want to keep your account and request deletion of selected data instead? Use the separate <Link href="/delete-data" className="text-[var(--its-red)] underline">data-deletion request page</Link>.</p>
         <ol className="list-decimal pl-5 space-y-2">
           <li>Sign in to the account you want to delete.</li>
           <li>Open <strong>Security</strong> and find <strong>Delete your account</strong>.</li>
