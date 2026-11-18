@@ -3016,8 +3016,8 @@ const photosRouter = router({
       const rawBuffer = Buffer.from(base64, "base64");
       const { buffer: buffer, mimeType: _pm } = await compressAvatar(rawBuffer);
       const key = `profile-photos/${ctx.user.id}/${Date.now()}.jpg`;
-      const { url } = await storagePut(key, buffer, "image/jpeg");
-      const id = await addProfilePhoto({ userId: ctx.user.id, url, storageKey: key });
+      const { key: storedKey, url } = await storagePut(key, buffer, "image/jpeg");
+      const id = await addProfilePhoto({ userId: ctx.user.id, url, storageKey: storedKey });
       // Auto-activate: immediately set as the current profile photo
       await setActiveProfilePhoto(id, ctx.user.id);
       return { id, url };
@@ -5156,7 +5156,9 @@ export const appRouter = router({
           throw new TRPCError({ code: "BAD_REQUEST", message: "Avatar image too large. Maximum size is 5 MB." });
         }
         const { buffer: compBuf } = await compressAvatar(buffer);
-        const key = `avatars/${ctx.user.id}/${Date.now()}.jpg`;
+        // Keep all new individual profile images in the dedicated per-user folder.
+        // Existing avatars/ URLs and files remain valid and are not moved.
+        const key = `profile-photos/${ctx.user.id}/${Date.now()}.jpg`;
         const { url } = await storagePut(key, compBuf, "image/jpeg");
         await uploadAvatar(ctx.user.id, url);
         return { url } as const;

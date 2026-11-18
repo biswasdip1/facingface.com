@@ -8,6 +8,8 @@
   margin-inline: auto;
 }
 .ff-home-menu {
+  /* Mobile already has header/settings and bottom navigation; no extra menu card. */
+  display: none;
   min-width: 0;
   border: 1px solid var(--its-border);
   border-radius: 10px;
@@ -62,7 +64,7 @@
 .ff-home-news-column { display: none; min-width: 0; }
 @media (min-width: 1024px) {
   .ff-home-grid { grid-template-columns: 224px minmax(0, 1fr); gap: 24px; }
-  .ff-home-menu { position: sticky; top: 96px; max-height: calc(100dvh - 112px); overflow-y: auto; }
+  .ff-home-menu { display: block; position: sticky; top: 96px; max-height: calc(100dvh - 112px); overflow-y: auto; }
   .ff-home-menu-heading { padding: 4px 4px 12px; border-bottom: 1px solid var(--its-border); }
   .ff-home-menu-toggle { display: none; }
   .ff-home-shortcuts { display: block; }

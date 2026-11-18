@@ -1,4 +1,18 @@
-# FacingFace complete data-request, Home menu, login and scroll update — 10 November 2026
+# FacingFace complete mobile-menu and profile-photo folder update — 18 November 2026
+
+**Latest package:** this release starts from your uploaded `facingface.com-main-GitHub-18-Nov-2026.zip`, retains every original file, and includes both the profile-photo folder change and the requested mobile Home-menu removal. Deploy this complete ZIP instead of the earlier profile-folder-only ZIP; there is no need to apply two separate packages.
+
+The entire **Explore FacingFace / Menu** card is hidden below the existing desktop-sidebar breakpoint of 1024 CSS pixels, with no empty grid row left above the post composer. At 1024 pixels and wider, the existing desktop sidebar and its shortcut links remain visible. This is based on viewport width, not whether the site is opened in a browser or an app. Existing header/settings and bottom navigation are unchanged; My Account still points to `/profile`, the same destination as the old Profile viewers shortcut. No route, feed content, post composer, theme, subscription or account-deletion functionality was removed. The only new executable client change is the Home-specific responsive CSS.
+
+Read `PROFILE_PHOTO_FOLDER_UPDATE.md` for the retained storage update. New individual avatar uploads consistently use `profile-photos/<user-ID>/`; new history rows save the actual returned storage key. Existing photos/URLs are not moved or rewritten. No new database migration, storage setting, subscription change or IPA/AAB is required by these changes. The folder is created as needed by your existing storage system when an upload occurs. Full database/media backups are still required.
+
+The updated source passed TypeScript, the full production build and 351 included non-database tests; 11 opt-in database tests were skipped. Nothing has been deployed to Render. Preserve the existing disk, database, environment and secrets; update the same deployment repository. The earlier notes below are retained as history, not a claim that this latest package was taken from the older ZIP.
+
+Local compiled-browser checks passed at widths 375, 390, 412, 640, 768, 820, 1023, 1024, 1280, 1434 and 1920: the Home menu is hidden below 1024, the composer has no empty menu grid track, the desktop sidebar/links remain, and no horizontal overflow was introduced. A 390-pixel check confirmed the existing mobile gear (More) still opens My Account at `/profile`. Native-marked local checks at 390 and 1024 also retained the free-edition purchase restriction and absence of blocking pull-to-refresh touch listeners. These tests used synthetic local responses, not real users or a physical TestFlight/Android device.
+
+After deployment, refresh the website or close/reopen the existing remote-backed app. On a phone, confirm the post composer now starts without the Explore card. On desktop, confirm the original sidebar remains. Do not clear app data just to refresh: that can remove local drafts. Your existing database, disk and Render settings must remain unchanged.
+
+## Earlier complete data-request, Home menu, login and scroll update — 10 November 2026
 
 This complete website package starts from your exact uploaded `FacingFace-Website-2026-11-04-Self-Delete-Deploy.zip`. Every original file is retained. The existing website, self-service account deletion, media/call repairs, November branding and normal-browser subscriptions are preserved. This is website source, not a new Android AAB or iOS IPA.
 

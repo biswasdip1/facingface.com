@@ -2,11 +2,14 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 const read = (file: string) => readFileSync(new URL(`../client/src/${file}`, import.meta.url), "utf8");
 describe("Home-only shortcut layout", () => {
-  it("adds a collapsed mobile menu with correctly linked expanded state", () => {
+  it("hides the entire shortcut card below the existing desktop breakpoint and retains desktop navigation", () => {
     const code = read("components/HomeMenuFrame.tsx");
-    expect(code).toContain("useState(false)");
-    expect(code).toContain('aria-expanded={open}');
-    expect(code).toContain('aria-controls="ff-home-shortcuts-content"');
+    const css = read("components/home-menu.css");
+    const desktopStart = css.indexOf("@media (min-width: 1024px)");
+    expect(desktopStart).toBeGreaterThan(0);
+    expect(css.slice(0, desktopStart)).toMatch(/\.ff-home-menu\s*\{[^}]*display:\s*none;/);
+    expect(css.slice(desktopStart)).toMatch(/\.ff-home-menu\s*\{[^}]*display:\s*block;/);
+    expect(css.slice(desktopStart)).toContain("grid-template-columns: 224px minmax(0, 1fr)");
     expect(code).toContain('id="ff-home-shortcuts-content"');
     expect(code).toContain('aria-label="Community shortcuts"');
   });
